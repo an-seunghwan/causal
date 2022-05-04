@@ -29,8 +29,8 @@ def _random_acyclic_orientation(B_und):
     return np.tril(_random_permutation(B_und), k=-1)
 B = _random_acyclic_orientation(B_und)
 
-B_perm = _random_permutation(B)
-ig.Graph.Adjacency(B_perm.tolist()).is_dag() # check DAGness
+B = _random_permutation(B)
+ig.Graph.Adjacency(B.tolist()).is_dag() # check DAGness
 #%%
 '''weighted adj matrix of DAG'''
 w_ranges=((-2.0, -0.5), (0.5, 2.0))
@@ -47,7 +47,23 @@ plt.figure(figsize=(6, 6))
 G = nx.from_numpy_matrix(W, create_using=nx.DiGraph)
 layout = nx.circular_layout(G)
 labels = nx.get_edge_attributes(G, 'weight')
-nx.draw(G, layout, with_labels=True, font_weight='bold')
-nx.draw_networkx_edge_labels(G, pos=layout, edge_labels=labels, font_weight='bold')
+nx.draw(G, layout, 
+        with_labels=True, 
+        font_size=20,
+        font_weight='bold',
+        arrowsize=30,
+        node_size=1000)
+nx.draw_networkx_edge_labels(G, 
+                             pos=layout, 
+                             edge_labels=labels, 
+                             font_weight='bold',
+                             font_size=15)
+plt.savefig(
+    "./assets/DAG_example.png",
+    dpi=100,
+    bbox_inches="tight",
+    pad_inches=0.1,
+)
 plt.show()
+plt.close()
 #%%
