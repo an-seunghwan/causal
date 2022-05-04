@@ -9,10 +9,10 @@ def set_random_seed(seed):
     random.seed(seed)
     np.random.seed(seed)
 
-set_random_seed(0)
+set_random_seed(10)
 #%%
 '''binary adj matrix of DAG'''
-d, s0, graph_type = 5, 5, 'ER'
+n, d, s0, graph_type = 100, 5, 5, 'ER'
 
 # Erdos-Renyi
 G_und = ig.Graph.Erdos_Renyi(n=d, m=s0)
@@ -41,6 +41,7 @@ for i, (low, high) in enumerate(w_ranges):
     U = np.random.uniform(low=low, high=high, size=B.shape)
     W += B * (S == i) * U
 W = np.round(W, 2)
+np.savetxt('./assets/W_example.csv', W, delimiter=',')
 #%%
 '''visualize weighted adj matrix of DAG'''
 plt.figure(figsize=(6, 6))
@@ -66,4 +67,19 @@ plt.savefig(
 )
 plt.show()
 plt.close()
+#%%
+'''simulate dataset'''
+d = W.shape[0]
+scale_vec = np.ones(d) # noise scale (standard deviation)
+
+G = ig.Graph.Weighted_Adjacency(W.tolist())
+ordered_vertices = G.topological_sorting()
+
+X = np.zeros([n, d])
+for j in ordered_vertices:
+    parents = G.neighbors(j, mode=ig.IN)
+    z = np.random.normal(scale=scale_vec[j], size=n)
+    x = X[:, parents] @ W[parents, j] + z
+    X[:, j] = x
+np.savetxt('./assets/X_example.csv', X, delimiter=',')
 #%%
