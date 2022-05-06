@@ -2,9 +2,13 @@
 import neptune.new as neptune
 from neptune.new.types import File
 
+with open("neptune.txt", "r") as f:
+    key = f.readlines()
+
 run = neptune.init(
     project="an-seunghwan/causal",
-    api_token="eyJhcGlfYWRkcmVzcyI6Imh0dHBzOi8vYXBwLm5lcHR1bmUuYWkiLCJhcGlfdXJsIjoiaHR0cHM6Ly9hcHAubmVwdHVuZS5haSIsImFwaV9rZXkiOiI3MmNjN2M2MS0yOGM3LTQ4MTctYmZkOS1iYWE5NGFhZDBhZDgifQ==",
+    api_token=key[0],
+    # run="",
 )  
 #%%
 import numpy as np
@@ -21,11 +25,10 @@ import scipy.optimize as sopt
 def set_random_seed(seed):
     random.seed(seed)
     np.random.seed(seed)
-
-set_random_seed(10)
 #%%
 '''binary adj matrix of DAG'''
 params = {
+    "seed": 10,
     "n": 500,
     "d": 5,
     "s0": 5,
@@ -41,11 +44,14 @@ params = {
     "rho_max": 1e+16, 
     "w_threshold": 0.3,
     "lambda": 0.1,
-    "progress_rate": 0.25,
+    "progress_rate": 0.1,
     "rho_rate": 10.,
 }
 
+set_random_seed(10)
+
 run["model/params"] = params
+# model_version["model/environment"].upload("environment.yml")
 
 # Erdos-Renyi
 G_und = ig.Graph.Erdos_Renyi(n=params["d"], m=params["s0"])
@@ -55,7 +61,6 @@ def _graph_to_adjmat(G):
 B_und = _graph_to_adjmat(G_und)
 
 def _random_permutation(M):
-    # np.random.permutation permutes first axis only
     P = np.random.permutation(np.eye(M.shape[0]))
     return P.T @ M @ P
 def _random_acyclic_orientation(B_und):
@@ -153,7 +158,7 @@ def _func(w):
     g_obj = np.concatenate((grad + params["lambda"], -grad + params["lambda"]), axis=None)
     return obj, g_obj
 #%%
-for _ in range(params["max_iter"]):
+for iteration in range(params["max_iter"]):
     w_new, h_new = None, None
     while rho < params["rho_max"]:
         sol = sopt.minimize(_func, w_est, method='L-BFGS-B', jac=True, bounds=bnds)
@@ -163,12 +168,49 @@ for _ in range(params["max_iter"]):
             rho *= params["rho_rate"]
         else:
             break
+    # update solution
     w_est, h = w_new, h_new
+    # dual ascent step
     alpha += params["rho"] * h
+    # stopping rules
     if h <= params["h_tol"] or rho >= params["rho_max"]:
         break
+    
+    """update log"""
+    run["train/iteration/rho"].log(rho)
+    run["train/iteration/h"].log(h)
+    run["train/iteration/alpha"].log(alpha)
+    
 W_est = _adj(w_est)
 W_est[np.abs(W_est) < params["w_threshold"]] = 0
 #%%
-# run.stop()
+"""chech DAGness of estimated weighted graph"""
+W_est = np.round(W_est, 2)
+
+fig = plt.figure(figsize=(6, 6))
+G = nx.from_numpy_matrix(W_est, create_using=nx.DiGraph)
+layout = nx.circular_layout(G)
+labels = nx.get_edge_attributes(G, 'weight')
+nx.draw(G, layout, 
+        with_labels=True, 
+        font_size=20,
+        font_weight='bold',
+        arrowsize=30,
+        node_size=1000)
+nx.draw_networkx_edge_labels(G, 
+                             pos=layout, 
+                             edge_labels=labels, 
+                             font_weight='bold',
+                             font_size=15)
+run["result/G_est"].upload(fig)
+plt.show()
+plt.close()
+
+assert ig.Graph.Weighted_Adjacency(W_est.tolist()).is_dag()
+# else:  
+#%%
+run["result/W_est"].upload(File.as_html(pd.DataFrame(W_est)))
+run["result/W_diff"].upload(File.as_html(pd.DataFrame(W - W_est)))
+#%%
+run.stop()
 #%%
