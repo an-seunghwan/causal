@@ -1,4 +1,15 @@
 #%%
+import numpy as np
+import pandas as pd
+import random
+import matplotlib.pyplot as plt
+
+import networkx as nx
+import igraph as ig
+
+import scipy.linalg as slin
+import scipy.optimize as sopt
+#%%
 params = {
     # "neptune": True, # True if you use neptune.ai
     
@@ -34,7 +45,7 @@ except:
 
 from neptune.new.types import File
 
-with open("neptune.txt", "r") as f:
+with open("neptune_api.txt", "r") as f:
     key = f.readlines()
 
 run = neptune.init(
@@ -48,17 +59,6 @@ run["sys/tags"].add(["notears", "linear"])
 # model_version["model/environment"].upload("environment.yml")
 
 run["model/params"] = params
-#%%
-import numpy as np
-import pandas as pd
-import random
-import matplotlib.pyplot as plt
-
-import networkx as nx
-import igraph as ig
-
-import scipy.linalg as slin
-import scipy.optimize as sopt
 #%%
 def set_random_seed(seed):
     random.seed(seed)
@@ -95,7 +95,8 @@ for i, (low, high) in enumerate(w_ranges):
 W = np.round(W, 2)
 
 run["model/params/W"].upload(File.as_html(pd.DataFrame(W)))
-#%%
+run["pickle/W"].upload(File.as_pickle(pd.DataFrame(W)))
+#%%s
 '''visualize weighted adj matrix of DAG'''
 fig = plt.figure(figsize=(6, 6))
 G = nx.from_numpy_matrix(W, create_using=nx.DiGraph)
@@ -130,6 +131,7 @@ for j in ordered_vertices:
     x = X[:, parents] @ W[parents, j] + z
     X[:, j] = x
 run["model/data"].upload(File.as_html(pd.DataFrame(X)))
+run["pickle/data"].upload(File.as_pickle(pd.DataFrame(X)))
 #%%
 n, d = X.shape
 
@@ -224,6 +226,7 @@ plt.close()
 #%%
 run["result/Is DAG?"] = ig.Graph.Weighted_Adjacency(W_est.tolist()).is_dag()
 run["result/W_est"].upload(File.as_html(pd.DataFrame(W_est)))
+run["pickle/W_est"].upload(File.as_pickle(pd.DataFrame(W_est)))
 run["result/W_diff"].upload(File.as_html(pd.DataFrame(W - W_est)))
 #%%
 run.stop()
