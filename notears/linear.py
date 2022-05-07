@@ -1,33 +1,7 @@
 #%%
-import neptune.new as neptune
-from neptune.new.types import File
-
-with open("neptune.txt", "r") as f:
-    key = f.readlines()
-
-run = neptune.init(
-    project="an-seunghwan/causal",
-    api_token=key[0],
-    # run="",
-)  
-#%%
-import numpy as np
-import pandas as pd
-import random
-import matplotlib.pyplot as plt
-
-import networkx as nx
-import igraph as ig
-
-import scipy.linalg as slin
-import scipy.optimize as sopt
-#%%
-def set_random_seed(seed):
-    random.seed(seed)
-    np.random.seed(seed)
-#%%
-'''binary adj matrix of DAG'''
 params = {
+    # "neptune": True, # True if you use neptune.ai
+    
     "seed": 10,
     "n": 500,
     "d": 5,
@@ -48,11 +22,51 @@ params = {
     "rho_rate": 10.,
 }
 
-set_random_seed(10)
+#%%
+# if params['neptune']:
+try:
+    import neptune.new as neptune
+except:
+    import sys
+    import subprocess
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "neptune-client"])
+    import neptune.new as neptune
 
-run["model/params"] = params
+from neptune.new.types import File
+
+with open("neptune.txt", "r") as f:
+    key = f.readlines()
+
+run = neptune.init(
+    project="an-seunghwan/causal",
+    api_token=key[0],
+    # run="",
+)  
+
+run["sys/name"] = "causal_notears_experiment"
+run["sys/tags"].add(["notears", "linear"])
 # model_version["model/environment"].upload("environment.yml")
 
+run["model/params"] = params
+#%%
+import numpy as np
+import pandas as pd
+import random
+import matplotlib.pyplot as plt
+
+import networkx as nx
+import igraph as ig
+
+import scipy.linalg as slin
+import scipy.optimize as sopt
+#%%
+def set_random_seed(seed):
+    random.seed(seed)
+    np.random.seed(seed)
+
+set_random_seed(params["seed"])
+#%%
+'''binary adj matrix of DAG'''
 # Erdos-Renyi
 G_und = ig.Graph.Erdos_Renyi(n=params["d"], m=params["s0"])
 
@@ -187,7 +201,7 @@ W_est[np.abs(W_est) < params["w_threshold"]] = 0
 """chech DAGness of estimated weighted graph"""
 W_est = np.round(W_est, 2)
 
-fig = plt.figure(figsize=(6, 6))
+fig = plt.figure(figsize=(4, 4))
 G = nx.from_numpy_matrix(W_est, create_using=nx.DiGraph)
 layout = nx.circular_layout(G)
 labels = nx.get_edge_attributes(G, 'weight')
@@ -206,9 +220,9 @@ run["result/G_est"].upload(fig)
 plt.show()
 plt.close()
 
-assert ig.Graph.Weighted_Adjacency(W_est.tolist()).is_dag()
-# else:  
+# assert ig.Graph.Weighted_Adjacency(W_est.tolist()).is_dag()
 #%%
+run["result/Is DAG?"] = ig.Graph.Weighted_Adjacency(W_est.tolist()).is_dag()
 run["result/W_est"].upload(File.as_html(pd.DataFrame(W_est)))
 run["result/W_diff"].upload(File.as_html(pd.DataFrame(W - W_est)))
 #%%
