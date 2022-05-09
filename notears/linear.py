@@ -45,7 +45,7 @@ except:
 
 from neptune.new.types import File
 
-with open("neptune_api.txt", "r") as f:
+with open("../neptune_api.txt", "r") as f:
     key = f.readlines()
 
 run = neptune.init(
