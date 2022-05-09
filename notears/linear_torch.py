@@ -1,14 +1,22 @@
 #%%
+import os 
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+#%%
 import numpy as np
 import pandas as pd
 import random
 import matplotlib.pyplot as plt
 
+import torch
+
 import networkx as nx
 import igraph as ig
 
-import scipy.linalg as slin
-import scipy.optimize as sopt
+from utils import (
+    _graph_to_adjmat,
+    _random_permutation,
+    _random_acyclic_orientation,
+)
 #%%
 params = {
     # "neptune": True, # True if you use neptune.ai
@@ -45,7 +53,7 @@ except:
 
 from neptune.new.types import File
 
-with open("neptune_api.txt", "r") as f:
+with open("../neptune_api.txt", "r") as f:
     key = f.readlines()
 
 run = neptune.init(
@@ -55,7 +63,7 @@ run = neptune.init(
 )  
 
 run["sys/name"] = "causal_notears_experiment"
-run["sys/tags"].add(["notears", "linear"])
+run["sys/tags"].add(["notears", "linear", "torch"])
 # model_version["model/environment"].upload("environment.yml")
 
 run["model/params"] = params
@@ -70,15 +78,8 @@ set_random_seed(params["seed"])
 # Erdos-Renyi
 G_und = ig.Graph.Erdos_Renyi(n=params["d"], m=params["s0"])
 
-def _graph_to_adjmat(G):
-    return np.array(G.get_adjacency().data)
 B_und = _graph_to_adjmat(G_und)
 
-def _random_permutation(M):
-    P = np.random.permutation(np.eye(M.shape[0]))
-    return P.T @ M @ P
-def _random_acyclic_orientation(B_und):
-    return np.tril(_random_permutation(B_und), k=-1)
 B = _random_acyclic_orientation(B_und)
 
 B = _random_permutation(B)
@@ -199,6 +200,32 @@ for iteration in range(params["max_iter"]):
     
 W_est = _adj(w_est)
 W_est[np.abs(W_est) < params["w_threshold"]] = 0
+#%%
+# def polish(self, nmaxsteps=50, patience=5, threshold=1e-10, save_to_self_model=False):
+#         if not save_to_self_model:
+#             model_bak = self.model
+#             self.model = copy.deepcopy(self.model)
+#         self.freeze()
+#         optimizer = optim.LBFGS(filter(lambda p: p.requires_grad, self.model.parameters()))
+#         def closure():
+#             optimizer.zero_grad()
+#             loss = self.loss()
+#             loss.backward()
+#             return loss
+#         n_bad_steps = 0
+#         best_loss = float('inf')
+#         for i in range(nmaxsteps):
+#             loss = optimizer.step(closure)
+#             if loss.item() < best_loss - threshold:
+#                 best_loss = loss.item()
+#                 n_bad_steps = 0
+#             else:
+#                 n_bad_steps += 1
+#             if n_bad_steps > patience:
+#                 break
+#         if not save_to_self_model:
+#             self.model = model_bak
+#         return loss.item() 
 #%%
 """chech DAGness of estimated weighted graph"""
 W_est = np.round(W_est, 2)
