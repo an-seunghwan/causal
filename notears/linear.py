@@ -13,10 +13,10 @@ import scipy.optimize as sopt
 params = {
     # "neptune": True, # True if you use neptune.ai
     
-    "seed": 10,
-    "n": 500,
-    "d": 5,
-    "s0": 5,
+    "seed": 1,
+    "n": 1000,
+    "d": 7,
+    "s0": 7,
     "graph_type": 'ER',
     
     "rho": 1., # initial value
@@ -98,15 +98,15 @@ run["model/params/W"].upload(File.as_html(pd.DataFrame(W)))
 run["pickle/W"].upload(File.as_pickle(pd.DataFrame(W)))
 #%%s
 '''visualize weighted adj matrix of DAG'''
-fig = plt.figure(figsize=(6, 6))
+fig = plt.figure(figsize=(9, 9))
 G = nx.from_numpy_matrix(W, create_using=nx.DiGraph)
-layout = nx.circular_layout(G)
+layout = nx.spectral_layout(G)
 labels = nx.get_edge_attributes(G, 'weight')
 nx.draw(G, layout, 
         with_labels=True, 
         font_size=20,
         font_weight='bold',
-        arrowsize=30,
+        arrowsize=40,
         node_size=1000)
 nx.draw_networkx_edge_labels(G, 
                              pos=layout, 
@@ -203,15 +203,15 @@ W_est[np.abs(W_est) < params["w_threshold"]] = 0
 """chech DAGness of estimated weighted graph"""
 W_est = np.round(W_est, 2)
 
-fig = plt.figure(figsize=(4, 4))
+fig = plt.figure(figsize=(9, 9))
 G = nx.from_numpy_matrix(W_est, create_using=nx.DiGraph)
-layout = nx.circular_layout(G)
+layout = nx.spectral_layout(G)
 labels = nx.get_edge_attributes(G, 'weight')
 nx.draw(G, layout, 
         with_labels=True, 
         font_size=20,
         font_weight='bold',
-        arrowsize=30,
+        arrowsize=40,
         node_size=1000)
 nx.draw_networkx_edge_labels(G, 
                              pos=layout, 
@@ -228,6 +228,29 @@ run["result/Is DAG?"] = ig.Graph.Weighted_Adjacency(W_est.tolist()).is_dag()
 run["result/W_est"].upload(File.as_html(pd.DataFrame(W_est)))
 run["pickle/W_est"].upload(File.as_pickle(pd.DataFrame(W_est)))
 run["result/W_diff"].upload(File.as_html(pd.DataFrame(W - W_est)))
+#%%
+W_ = (W != 0).astype(float)
+W_est_ = (W_est != 0).astype(float)
+W_diff_ = np.abs(W_ - W_est_)
+
+fig = plt.figure(figsize=(9, 9))
+G = nx.from_numpy_matrix(W_diff_, create_using=nx.DiGraph)
+layout = nx.spectral_layout(G)
+labels = nx.get_edge_attributes(G, 'weight')
+nx.draw(G, layout, 
+        with_labels=True, 
+        font_size=20,
+        font_weight='bold',
+        arrowsize=40,
+        node_size=1000)
+nx.draw_networkx_edge_labels(G, 
+                             pos=layout, 
+                             edge_labels=labels, 
+                             font_weight='bold',
+                             font_size=15)
+run["result/G_diff"].upload(fig)
+plt.show()
+plt.close()
 #%%
 run.stop()
 #%%
