@@ -37,12 +37,12 @@ params = {
     "alpha": 0., # initial value
     "h": np.inf, # initial value
     
-    "lr": 0.001,
+    "lr": 0.1,
     "loss_type": 'l2',
     "max_iter": 100, 
     "h_tol": 1e-8, 
     "w_threshold": 0.3,
-    "lambda": 0.01,
+    "lambda": 0.5,
     "progress_rate": 0.9,
     # "rho_max": 1e+16, 
     # "rho_rate": 10.,
@@ -133,19 +133,23 @@ alpha = params["alpha"]
 # h = float((trace_expm(W_est * W_est) - params["d"]).item())
 h = params["h"]
 
-optimizer = torch.optim.SGD([W_est], lr=params["lr"])
+optimizer = torch.optim.Adam([W_est], lr=params["lr"])
 #%%
 for iteration in tqdm.tqdm(range(params["max_iter"])):
     # primal update
+    count = 0
     while True:
+    # for _ in tqdm.tqdm(range(1000)):
         optimizer.zero_grad()
         loss = loss_function(X, W_est, alpha, rho)
         loss.backward()
         optimizer.step()
         
-        h_new = trace_expm(W_est) - params["d"]
-        h_new = h_new.item()
+        count += 1
+        if count % 200 == 0:
+            print(loss.item(), h_new, rho)
         
+        h_new = (trace_expm(W_est * W_est) - params["d"]).item()
         if h_new < params["progress_rate"] * h: break
         
     # update
