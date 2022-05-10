@@ -1,15 +1,16 @@
 #%%
 import os
-from pydoc import visiblename 
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 #%%
 import numpy as np
 import pandas as pd
-import random
 import matplotlib.pyplot as plt
+import tqdm
 
-import networkx as nx
 import igraph as ig
+
+import torch
+import scipy.linalg as slin
 
 from utils.simulation import (
     set_random_seed,
@@ -36,14 +37,15 @@ params = {
     "alpha": 0., # initial value
     "h": np.inf, # initial value
     
+    "lr": 0.001,
     "loss_type": 'l2',
     "max_iter": 100, 
     "h_tol": 1e-8, 
-    "rho_max": 1e+16, 
     "w_threshold": 0.3,
-    "lambda": 0.1,
-    "progress_rate": 0.1,
-    "rho_rate": 10.,
+    "lambda": 0.01,
+    "progress_rate": 0.9,
+    # "rho_max": 1e+16, 
+    # "rho_rate": 10.,
 }
 #%%
 # if params['neptune']:
@@ -84,136 +86,101 @@ run["model/params/G"].upload(fig)
 #%%
 '''simulate dataset'''
 X = simulate_linear_sem(W_true, params["n"], params["sem_type"])
+n, d = X.shape
+assert n == params["n"]
+assert d == params["d"]
 run["model/data"].upload(File.as_html(pd.DataFrame(X)))
 run["pickle/data"].upload(File.as_pickle(pd.DataFrame(X)))
 #%%
+'''?????'''
+class TraceExpm(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, input):
+        # detach so we can cast to NumPy
+        E = slin.expm(input.detach().numpy())
+        f = np.trace(E)
+        E = torch.from_numpy(E)
+        ctx.save_for_backward(E)
+        return torch.as_tensor(f, dtype=input.dtype)
 
+    @staticmethod
+    def backward(ctx, grad_output):
+        E, = ctx.saved_tensors
+        grad_input = grad_output * E.t()
+        return grad_input
 
-
-
-
-
-
-
+trace_expm = TraceExpm.apply
 #%%
-n, d = X.shape
+def loss_function(X, W_est, alpha, rho):
+    """Evaluate value and gradient of augmented Lagrangian."""
+    R = X - X.matmul(W_est)
+    loss = 0.5 * torch.pow(R, 2).mean() + params["lambda"] * W_est.abs().sum()
+    
+    h = trace_expm(W_est) - W_est.shape[0]
+    loss += (0.5 * rho * torch.pow(h, 2)) + (alpha * h)
+    return loss
+#%%
+'''optimization process'''
+X = X - np.mean(X, axis=0, keepdims=True) # normalize
+X = torch.FloatTensor(X)
 
-assert n == params["n"]
-assert d == params["d"]
+W_est = torch.zeros((params["d"], params["d"]), 
+                    requires_grad=True)
 
-w_est = np.zeros(2 * d * d) # double w_est into (w_pos, w_neg)
+# initial values
 rho = params["rho"]
 alpha = params["alpha"]
+# h = float((trace_expm(W_est * W_est) - params["d"]).item())
 h = params["h"]
 
-'''?'''
-bnds = [(0, 0) if i == j else (0, None) for _ in range(2) for i in range(d) for j in range(d)]
-
-X = X - np.mean(X, axis=0, keepdims=True) # normalize
+optimizer = torch.optim.SGD([W_est], lr=params["lr"])
 #%%
-def _adj(w):
-    """Convert doubled variables ([2 d^2] array) back to original variables ([d, d] matrix)."""
-    return (w[:d * d] - w[d * d:]).reshape([d, d])
-
-def _h(W):
-    """Evaluate value and gradient of acyclicity constraint."""
-    E = slin.expm(W * W)  # (Zheng et al. 2018)
-    h = np.trace(E) - d
-    grad_h = E.T * W * 2
-    return h, grad_h
-
-def _func(w):
-    """Evaluate value and gradient of augmented Lagrangian for doubled variables ([2 d^2] array)."""
-    W = _adj(w)
-    
-    R = X - X @ W
-    loss = 0.5 / n * (R ** 2).sum() + (params["lambda"] * w.sum())
-    
-    h, grad_h= _h(W)
-    obj = loss + (0.5 * params["rho"] * h * h) + (params["alpha"] * h)
-    
-    grad = - 1. / n * X.T @ R
-    grad += (params["alpha"] + params["rho"] * h) * grad_h
-    g_obj = np.concatenate((grad + params["lambda"], -grad + params["lambda"]), axis=None)
-    return obj, g_obj
-#%%
-for iteration in range(params["max_iter"]):
-    w_new, h_new = None, None
-    while rho < params["rho_max"]:
-        sol = sopt.minimize(_func, w_est, method='L-BFGS-B', jac=True, bounds=bnds)
-        w_new = sol.x
-        h_new, _ = _h(_adj(w_new))
-        if h_new > params["progress_rate"] * h:
-            rho *= params["rho_rate"]
-        else:
-            break
-    # update solution
-    w_est, h = w_new, h_new
+for iteration in tqdm.tqdm(range(params["max_iter"])):
+    # primal update
+    while True:
+        optimizer.zero_grad()
+        loss = loss_function(X, W_est, alpha, rho)
+        loss.backward()
+        optimizer.step()
+        
+        h_new = trace_expm(W_est) - params["d"]
+        h_new = h_new.item()
+        
+        if h_new < params["progress_rate"] * h: break
+        
+    # update
+    h = float((trace_expm(W_est * W_est) - params["d"]).item())
     # dual ascent step
-    alpha += params["rho"] * h
+    alpha += rho * h
     # stopping rules
-    if h <= params["h_tol"] or rho >= params["rho_max"]:
-        break
-    
+    if h <= params["h_tol"]: break
+   
     """update log"""
-    run["train/iteration/rho"].log(rho)
     run["train/iteration/h"].log(h)
     run["train/iteration/alpha"].log(alpha)
+    # run["train/iteration/rho"].log(rho)
     
-W_est = _adj(w_est)
+    print(loss.item(), h_new, rho)
+    
+W_est = W_est.detach().numpy().round(2)
 W_est[np.abs(W_est) < params["w_threshold"]] = 0
 #%%
 """chech DAGness of estimated weighted graph"""
-W_est = np.round(W_est, 2)
-
-fig = plt.figure(figsize=(9, 9))
-G = nx.from_numpy_matrix(W_est, create_using=nx.DiGraph)
-layout = nx.planar_layout(G)
-labels = nx.get_edge_attributes(G, 'weight')
-nx.draw(G, layout, 
-        with_labels=True, 
-        font_size=20,
-        font_weight='bold',
-        arrowsize=40,
-        node_size=1000)
-nx.draw_networkx_edge_labels(G, 
-                             pos=layout, 
-                             edge_labels=labels, 
-                             font_weight='bold',
-                             font_size=15)
+fig = viz_graph(W_est, size=(7, 7), show=True)
 run["result/G_est"].upload(fig)
-plt.show()
-plt.close()
-
 # assert ig.Graph.Weighted_Adjacency(W_est.tolist()).is_dag()
 #%%
 run["result/Is DAG?"] = ig.Graph.Weighted_Adjacency(W_est.tolist()).is_dag()
 run["result/W_est"].upload(File.as_html(pd.DataFrame(W_est)))
 run["pickle/W_est"].upload(File.as_pickle(pd.DataFrame(W_est)))
-run["result/W_diff"].upload(File.as_html(pd.DataFrame(W - W_est)))
+run["result/W_diff"].upload(File.as_html(pd.DataFrame(W_true - W_est)))
 #%%
-W_ = (W != 0).astype(float)
+W_ = (W_true != 0).astype(float)
 W_est_ = (W_est != 0).astype(float)
 W_diff_ = np.abs(W_ - W_est_)
 
-fig = plt.figure(figsize=(9, 9))
-G = nx.from_numpy_matrix(W_diff_, create_using=nx.DiGraph)
-layout = nx.planar_layout(G)
-labels = nx.get_edge_attributes(G, 'weight')
-nx.draw(G, layout, 
-        with_labels=True, 
-        font_size=20,
-        font_weight='bold',
-        arrowsize=40,
-        node_size=1000)
-nx.draw_networkx_edge_labels(G, 
-                             pos=layout, 
-                             edge_labels=labels, 
-                             font_weight='bold',
-                             font_size=15)
+fig = viz_graph(W_diff_, size=(7, 7), show=True)
 run["result/G_diff"].upload(fig)
-plt.show()
-plt.close()
 #%%
 run.stop()
 #%%
