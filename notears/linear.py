@@ -1,4 +1,8 @@
 #%%
+import os
+from pydoc import visiblename 
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+#%%
 import numpy as np
 import pandas as pd
 import random
@@ -7,17 +11,26 @@ import matplotlib.pyplot as plt
 import networkx as nx
 import igraph as ig
 
-import scipy.linalg as slin
-import scipy.optimize as sopt
+from utils.simulation import (
+    set_random_seed,
+    simulate_dag,
+    simulate_parameter,
+    simulate_linear_sem,
+)
+
+from utils.viz import (
+    viz_graph
+)
 #%%
 params = {
     # "neptune": True, # True if you use neptune.ai
     
-    "seed": 1,
-    "n": 1000,
-    "d": 7,
-    "s0": 7,
+    "seed": 10,
+    "n": 200,
+    "d": 5,
+    "s0": 5,
     "graph_type": 'ER',
+    "sem_type": 'gauss',
     
     "rho": 1., # initial value
     "alpha": 0., # initial value
@@ -32,7 +45,6 @@ params = {
     "progress_rate": 0.1,
     "rho_rate": 10.,
 }
-
 #%%
 # if params['neptune']:
 try:
@@ -55,83 +67,34 @@ run = neptune.init(
 )  
 
 run["sys/name"] = "causal_notears_experiment"
-run["sys/tags"].add(["notears", "linear"])
-# model_version["model/environment"].upload("environment.yml")
-
+run["sys/tags"].add(["notears", "linear", "torch"])
 run["model/params"] = params
-#%%
-def set_random_seed(seed):
-    random.seed(seed)
-    np.random.seed(seed)
 
+# model_version["model/environment"].upload("environment.yml")
+#%%
+'''simulate DAG and weighted adjacency matrix'''
 set_random_seed(params["seed"])
-#%%
-'''binary adj matrix of DAG'''
-# Erdos-Renyi
-G_und = ig.Graph.Erdos_Renyi(n=params["d"], m=params["s0"])
+B_true = simulate_dag(params["d"], params["s0"], params["graph_type"])
+W_true = simulate_parameter(B_true)
 
-def _graph_to_adjmat(G):
-    return np.array(G.get_adjacency().data)
-B_und = _graph_to_adjmat(G_und)
-
-def _random_permutation(M):
-    P = np.random.permutation(np.eye(M.shape[0]))
-    return P.T @ M @ P
-def _random_acyclic_orientation(B_und):
-    return np.tril(_random_permutation(B_und), k=-1)
-B = _random_acyclic_orientation(B_und)
-
-B = _random_permutation(B)
-assert ig.Graph.Adjacency(B.tolist()).is_dag() # check DAGness
-#%%
-'''weighted adj matrix of DAG'''
-w_ranges=((-2.0, -0.5), (0.5, 2.0))
-
-W = np.zeros(B.shape)
-S = np.random.randint(len(w_ranges), size=B.shape)  # which range
-for i, (low, high) in enumerate(w_ranges):
-    U = np.random.uniform(low=low, high=high, size=B.shape)
-    W += B * (S == i) * U
-W = np.round(W, 2)
-
-run["model/params/W"].upload(File.as_html(pd.DataFrame(W)))
-run["pickle/W"].upload(File.as_pickle(pd.DataFrame(W)))
-#%%s
-'''visualize weighted adj matrix of DAG'''
-fig = plt.figure(figsize=(9, 9))
-G = nx.from_numpy_matrix(W, create_using=nx.DiGraph)
-layout = nx.spectral_layout(G)
-labels = nx.get_edge_attributes(G, 'weight')
-nx.draw(G, layout, 
-        with_labels=True, 
-        font_size=20,
-        font_weight='bold',
-        arrowsize=40,
-        node_size=1000)
-nx.draw_networkx_edge_labels(G, 
-                             pos=layout, 
-                             edge_labels=labels, 
-                             font_weight='bold',
-                             font_size=15)
+run["model/params/W"].upload(File.as_html(pd.DataFrame(W_true)))
+run["pickle/W"].upload(File.as_pickle(pd.DataFrame(W_true)))
+fig = viz_graph(W_true, size=(7, 7), show=True)
 run["model/params/G"].upload(fig)
-plt.show()
-plt.close()
 #%%
 '''simulate dataset'''
-d = W.shape[0]
-scale_vec = np.ones(d) # noise scale (standard deviation)
-
-G = ig.Graph.Weighted_Adjacency(W.tolist())
-ordered_vertices = G.topological_sorting()
-
-X = np.zeros([params["n"], params["d"]])
-for j in ordered_vertices:
-    parents = G.neighbors(j, mode=ig.IN)
-    z = np.random.normal(scale=scale_vec[j], size=params["n"])
-    x = X[:, parents] @ W[parents, j] + z
-    X[:, j] = x
+X = simulate_linear_sem(W_true, params["n"], params["sem_type"])
 run["model/data"].upload(File.as_html(pd.DataFrame(X)))
 run["pickle/data"].upload(File.as_pickle(pd.DataFrame(X)))
+#%%
+
+
+
+
+
+
+
+
 #%%
 n, d = X.shape
 
@@ -205,7 +168,7 @@ W_est = np.round(W_est, 2)
 
 fig = plt.figure(figsize=(9, 9))
 G = nx.from_numpy_matrix(W_est, create_using=nx.DiGraph)
-layout = nx.spectral_layout(G)
+layout = nx.planar_layout(G)
 labels = nx.get_edge_attributes(G, 'weight')
 nx.draw(G, layout, 
         with_labels=True, 
@@ -235,7 +198,7 @@ W_diff_ = np.abs(W_ - W_est_)
 
 fig = plt.figure(figsize=(9, 9))
 G = nx.from_numpy_matrix(W_diff_, create_using=nx.DiGraph)
-layout = nx.spectral_layout(G)
+layout = nx.planar_layout(G)
 labels = nx.get_edge_attributes(G, 'weight')
 nx.draw(G, layout, 
         with_labels=True, 
