@@ -31,9 +31,9 @@ params = {
     # "neptune": True, # True if you use neptune.ai
     
     "seed": 10,
-    "n": 200,
-    "d": 5,
-    "s0": 5,
+    "n": 1000,
+    "d": 7,
+    "s0": 7,
     "graph_type": 'ER',
     "sem_type": 'gauss',
     
@@ -41,12 +41,12 @@ params = {
     "alpha": 0., # initial value
     "h": np.inf, # initial value
     
-    "lr": 0.005,
+    "lr": 0.001,
     "loss_type": 'l2',
     "max_iter": 100, 
     "h_tol": 1e-8, 
-    "w_threshold": 0.3,
-    "lambda": 0.1,
+    "w_threshold": 0.2,
+    "lambda": 0.005,
     "progress_rate": 0.25,
     "rho_max": 1e+16, 
     "rho_rate": 10.,
@@ -91,7 +91,7 @@ fig = viz_heatmap(W_true, size=(5, 4), show=True)
 run["model/params/heatmap"].upload(fig)
 #%%
 '''simulate dataset'''
-X = simulate_linear_sem(W_true, params["n"], params["sem_type"])
+X = simulate_linear_sem(W_true, params["n"], params["sem_type"], normalize=True)
 n, d = X.shape
 assert n == params["n"]
 assert d == params["d"]

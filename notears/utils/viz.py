@@ -29,8 +29,7 @@ def viz_graph(W, size=(6, 6), show=False):
 def viz_heatmap(W, size=(5, 4), show=False):
     """visualize heatmap of weighted adj matrix of DAG"""
     fig = plt.figure(figsize=size)
-    plt.pcolor(W,
-           cmap='coolwarm')
+    plt.pcolor(W, cmap='coolwarm')
     plt.colorbar()
     if show:
         plt.show()
