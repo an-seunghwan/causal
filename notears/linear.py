@@ -5,6 +5,7 @@ os.chdir(os.path.dirname(os.path.abspath(__file__)))
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import seaborn as sns
 import tqdm
 
 import igraph as ig
@@ -20,7 +21,8 @@ from utils.simulation import (
 )
 
 from utils.viz import (
-    viz_graph
+    viz_graph,
+    viz_heatmap,
 )
 #%%
 params = {
@@ -33,19 +35,19 @@ params = {
     "graph_type": 'ER',
     "sem_type": 'gauss',
     
-    "rho": 1., # initial value
+    "rho": 1, # initial value
     "alpha": 0., # initial value
     "h": np.inf, # initial value
     
-    "lr": 0.1,
+    "lr": 0.005,
     "loss_type": 'l2',
     "max_iter": 100, 
     "h_tol": 1e-8, 
     "w_threshold": 0.3,
-    "lambda": 0.5,
-    "progress_rate": 0.9,
+    "lambda": 0.1,
+    "progress_rate": 0.25,
     # "rho_max": 1e+16, 
-    # "rho_rate": 10.,
+    "rho_rate": 10.,
 }
 #%%
 # if params['neptune']:
@@ -82,7 +84,9 @@ W_true = simulate_parameter(B_true)
 run["model/params/W"].upload(File.as_html(pd.DataFrame(W_true)))
 run["pickle/W"].upload(File.as_pickle(pd.DataFrame(W_true)))
 fig = viz_graph(W_true, size=(7, 7), show=True)
-run["model/params/G"].upload(fig)
+run["model/params/Graph"].upload(fig)
+fig = viz_heatmap(W_true, size=(5, 4), show=True)
+run["model/params/heatmap"].upload(fig)
 #%%
 '''simulate dataset'''
 X = simulate_linear_sem(W_true, params["n"], params["sem_type"])
@@ -110,18 +114,24 @@ class TraceExpm(torch.autograd.Function):
         return grad_input
 
 trace_expm = TraceExpm.apply
+
+def h_fun(W):
+    """Evaluate DAGness constraint"""
+    h = trace_expm(W * W) - W.shape[0]
+    return h
 #%%
 def loss_function(X, W_est, alpha, rho):
     """Evaluate value and gradient of augmented Lagrangian."""
     R = X - X.matmul(W_est)
-    loss = 0.5 * torch.pow(R, 2).mean() + params["lambda"] * W_est.abs().sum()
+    # loss = 0.5 / params["n"] * (R ** 2).sum() + params["lambda"] * W_est.abs().sum()
+    loss = 0.5 / params["n"] * (R ** 2).sum() + params["lambda"] * torch.norm(W_est, p=1)
     
-    h = trace_expm(W_est) - W_est.shape[0]
-    loss += (0.5 * rho * torch.pow(h, 2)) + (alpha * h)
+    h = h_fun(W_est)
+    loss += (0.5 * rho * (h ** 2))
+    loss += (alpha * h)
     return loss
 #%%
 '''optimization process'''
-X = X - np.mean(X, axis=0, keepdims=True) # normalize
 X = torch.FloatTensor(X)
 
 W_est = torch.zeros((params["d"], params["d"]), 
@@ -130,48 +140,58 @@ W_est = torch.zeros((params["d"], params["d"]),
 # initial values
 rho = params["rho"]
 alpha = params["alpha"]
-# h = float((trace_expm(W_est * W_est) - params["d"]).item())
 h = params["h"]
 
 optimizer = torch.optim.Adam([W_est], lr=params["lr"])
 #%%
-for iteration in tqdm.tqdm(range(params["max_iter"])):
+for iteration in range(params["max_iter"]):
     # primal update
     count = 0
+    h_old = np.inf
     while True:
-    # for _ in tqdm.tqdm(range(1000)):
         optimizer.zero_grad()
         loss = loss_function(X, W_est, alpha, rho)
         loss.backward()
         optimizer.step()
         
+        h_new = h_fun(W_est).item()
+        if h_new < params["progress_rate"] * h: 
+            break
+        elif abs(h_old - h_new) < 1e-8: # no change in weight estimation
+            rho *= params["rho_rate"]
+        h_old = h_new
+            
         count += 1
-        if count % 200 == 0:
-            print(loss.item(), h_new, rho)
-        
-        h_new = (trace_expm(W_est * W_est) - params["d"]).item()
-        if h_new < params["progress_rate"] * h: break
+        if count % 10 == 0:
+            """update log"""
+            run["train/inner_loop/h_new"].log(h_new)
+            run["train/inner_loop/loss"].log(loss.item())
         
     # update
-    h = float((trace_expm(W_est * W_est) - params["d"]).item())
+    h = h_new
     # dual ascent step
     alpha += rho * h
     # stopping rules
-    if h <= params["h_tol"]: break
+    if h <= params["h_tol"]: 
+        break
    
     """update log"""
     run["train/iteration/h"].log(h)
     run["train/iteration/alpha"].log(alpha)
+    run["train/iteration/loss"].log(loss.item())
     # run["train/iteration/rho"].log(rho)
     
-    print(loss.item(), h_new, rho)
-    
-W_est = W_est.detach().numpy().round(2)
-W_est[np.abs(W_est) < params["w_threshold"]] = 0
+    print('[iteration {:03d}]: loss: {:.4f}, h(W): {:.4f}, primal update: {:04d}'.format(
+        iteration, loss.item(), h, count))
+#%%
+W_est = W_est.detach().numpy().astype(float).round(2)
+W_est[np.abs(W_est) < params["w_threshold"]] = 0.
 #%%
 """chech DAGness of estimated weighted graph"""
 fig = viz_graph(W_est, size=(7, 7), show=True)
-run["result/G_est"].upload(fig)
+run["result/Graph_est"].upload(fig)
+fig = viz_heatmap(W_est, size=(5, 4), show=True)
+run["result/heatmap_est"].upload(fig)
 # assert ig.Graph.Weighted_Adjacency(W_est.tolist()).is_dag()
 #%%
 run["result/Is DAG?"] = ig.Graph.Weighted_Adjacency(W_est.tolist()).is_dag()
