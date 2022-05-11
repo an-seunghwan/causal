@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import networkx as nx
 import igraph as ig
 #%%
-def viz_graph(W, size=(9, 9), show=False):
+def viz_graph(W, size=(6, 6), show=False):
     """visualize weighted adj matrix of DAG"""
     fig = plt.figure(figsize=size)
     G = nx.from_numpy_matrix(W, create_using=nx.DiGraph)
