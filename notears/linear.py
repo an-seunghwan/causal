@@ -14,10 +14,12 @@ import torch
 import scipy.linalg as slin
 
 from utils.simulation import (
+    is_dag,
     set_random_seed,
     simulate_dag,
     simulate_parameter,
     simulate_linear_sem,
+    count_accuracy,
 )
 
 from utils.viz import (
@@ -46,7 +48,7 @@ params = {
     "w_threshold": 0.3,
     "lambda": 0.1,
     "progress_rate": 0.25,
-    # "rho_max": 1e+16, 
+    "rho_max": 1e+16, 
     "rho_rate": 10.,
 }
 #%%
@@ -158,7 +160,10 @@ for iteration in range(params["max_iter"]):
         if h_new < params["progress_rate"] * h: 
             break
         elif abs(h_old - h_new) < 1e-8: # no change in weight estimation
-            rho *= params["rho_rate"]
+            if rho >= params["rho_max"]:
+                break
+            else:
+                rho *= params["rho_rate"]
         h_old = h_new
             
         count += 1
@@ -172,7 +177,7 @@ for iteration in range(params["max_iter"]):
     # dual ascent step
     alpha += rho * h
     # stopping rules
-    if h <= params["h_tol"]: 
+    if h <= params["h_tol"] or rho >= params["rho_max"]: 
         break
    
     """update log"""
@@ -184,27 +189,31 @@ for iteration in range(params["max_iter"]):
     print('[iteration {:03d}]: loss: {:.4f}, h(W): {:.4f}, primal update: {:04d}'.format(
         iteration, loss.item(), h, count))
 #%%
+"""chech DAGness of estimated weighted graph"""
 W_est = W_est.detach().numpy().astype(float).round(2)
 W_est[np.abs(W_est) < params["w_threshold"]] = 0.
-#%%
-"""chech DAGness of estimated weighted graph"""
+
 fig = viz_graph(W_est, size=(7, 7), show=True)
 run["result/Graph_est"].upload(fig)
 fig = viz_heatmap(W_est, size=(5, 4), show=True)
 run["result/heatmap_est"].upload(fig)
-# assert ig.Graph.Weighted_Adjacency(W_est.tolist()).is_dag()
-#%%
-run["result/Is DAG?"] = ig.Graph.Weighted_Adjacency(W_est.tolist()).is_dag()
+
+run["result/Is DAG?"] = is_dag(W_est)
 run["result/W_est"].upload(File.as_html(pd.DataFrame(W_est)))
 run["pickle/W_est"].upload(File.as_pickle(pd.DataFrame(W_est)))
 run["result/W_diff"].upload(File.as_html(pd.DataFrame(W_true - W_est)))
-#%%
+
 W_ = (W_true != 0).astype(float)
 W_est_ = (W_est != 0).astype(float)
 W_diff_ = np.abs(W_ - W_est_)
 
 fig = viz_graph(W_diff_, size=(7, 7), show=True)
-run["result/G_diff"].upload(fig)
+run["result/Graph_diff"].upload(fig)
+#%%
+"""accuracy"""
+B_est = (W_est != 0).astype(float)
+acc = count_accuracy(B_true, B_est)
+run["result/accuracy"] = acc
 #%%
 run.stop()
 #%%
