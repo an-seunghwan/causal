@@ -6,7 +6,6 @@ import igraph as ig
 #%%
 def viz_graph(W, size=(9, 9), show=False):
     """visualize weighted adj matrix of DAG"""
-    ''''''
     fig = plt.figure(figsize=size)
     G = nx.from_numpy_matrix(W, create_using=nx.DiGraph)
     layout = nx.planar_layout(G)
@@ -22,6 +21,17 @@ def viz_graph(W, size=(9, 9), show=False):
                                 edge_labels=labels, 
                                 font_weight='bold',
                                 font_size=15)
+    if show:
+        plt.show()
+    plt.close()
+    return fig
+#%%
+def viz_heatmap(W, size=(5, 4), show=False):
+    """visualize heatmap of weighted adj matrix of DAG"""
+    fig = plt.figure(figsize=size)
+    plt.pcolor(W,
+           cmap='coolwarm')
+    plt.colorbar()
     if show:
         plt.show()
     plt.close()

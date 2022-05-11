@@ -83,13 +83,14 @@ def simulate_parameter(B, w_ranges=((-2.0, -0.5), (0.5, 2.0))):
         W += B * (S == i) * U
     return W.round(2)
 #%%
-def simulate_linear_sem(W, n, sem_type, noise_scale=None):
+def simulate_linear_sem(W, n, sem_type, noise_scale=None, normalize=True):
     """simulate samples from linear SEM with specified type of noise.
     Args:
         W (np.ndarray): d x d weighted adjacency matrix of DAG
         n (int): number of samples, n = inf mimics population risk
         sem_type (str): gauss, exp, gumbel, uniform, logistic, poisson
         noise_scale (np.ndarray): scale parameter of addictive noise, default all ones
+        normalize (bool): If True, normalize simulated dataset
 
     Returns:
         X (np.ndarray): n x d sample matrix, 
@@ -154,5 +155,8 @@ def simulate_linear_sem(W, n, sem_type, noise_scale=None):
     for j in ordered_vertices:
         parents = G.neighbors(j, mode=ig.IN)
         X[:, j] = _simulate_single_equation(X[:, parents], W[parents, j], scale_vec[j])
+    
+    if normalize:
+        X = X - np.mean(X, axis=0, keepdims=True) # normalize
     return X
 #%%
