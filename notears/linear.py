@@ -4,14 +4,8 @@ os.chdir(os.path.dirname(os.path.abspath(__file__)))
 #%%
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
-import tqdm
-
-import igraph as ig
 
 import torch
-import scipy.linalg as slin
 
 from utils.simulation import (
     is_dag,
@@ -26,6 +20,8 @@ from utils.viz import (
     viz_graph,
     viz_heatmap,
 )
+
+from utils.trac_exp import trace_expm
 #%%
 params = {
     # "neptune": True, # True if you use neptune.ai
@@ -98,25 +94,6 @@ assert d == params["d"]
 run["model/data"].upload(File.as_html(pd.DataFrame(X)))
 run["pickle/data"].upload(File.as_pickle(pd.DataFrame(X)))
 #%%
-'''?????'''
-class TraceExpm(torch.autograd.Function):
-    @staticmethod
-    def forward(ctx, input):
-        # detach so we can cast to NumPy
-        E = slin.expm(input.detach().numpy())
-        f = np.trace(E)
-        E = torch.from_numpy(E)
-        ctx.save_for_backward(E)
-        return torch.as_tensor(f, dtype=input.dtype)
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        E, = ctx.saved_tensors
-        grad_input = grad_output * E.t()
-        return grad_input
-
-trace_expm = TraceExpm.apply
-
 def h_fun(W):
     """Evaluate DAGness constraint"""
     h = trace_expm(W * W) - W.shape[0]
