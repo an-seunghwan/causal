@@ -3,16 +3,17 @@ import os
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 #%%
 import numpy as np
+np.set_printoptions(precision=3)
 import pandas as pd
 
 import torch
+torch.set_default_dtype(torch.float)
 
 from utils.simulation import (
     is_dag,
     set_random_seed,
     simulate_dag,
-    simulate_parameter,
-    simulate_linear_sem,
+    simulate_nonlinear_sem,
     count_accuracy,
 )
 
@@ -27,11 +28,12 @@ params = {
     # "neptune": True, # True if you use neptune.ai
     
     "seed": 10,
-    "n": 1000,
-    "d": 7,
-    "s0": 7,
+    "n": 200,
+    "d": 5,
+    "s0": 9,
     "graph_type": 'ER',
-    "sem_type": 'gauss',
+    "sem_type": 'mlp', # only mlp
+    "hidden_dims": [16, 32],
     
     "rho": 1, # initial value
     "alpha": 0., # initial value
@@ -69,7 +71,7 @@ run = neptune.init(
 )  
 
 run["sys/name"] = "causal_notears_experiment"
-run["sys/tags"].add(["notears", "linear", "torch"])
+run["sys/tags"].add(["notears", "nonlinear", "torch"])
 run["model/params"] = params
 
 # model_version["model/environment"].upload("environment.yml")
@@ -77,21 +79,25 @@ run["model/params"] = params
 '''simulate DAG and weighted adjacency matrix'''
 set_random_seed(params["seed"])
 B_true = simulate_dag(params["d"], params["s0"], params["graph_type"])
-W_true = simulate_parameter(B_true)
 
-run["model/params/W"].upload(File.as_html(pd.DataFrame(W_true)))
-run["pickle/W"].upload(File.as_pickle(pd.DataFrame(W_true)))
-fig = viz_graph(W_true, size=(7, 7), show=True)
+run["model/params/B"].upload(File.as_html(pd.DataFrame(B_true)))
+run["pickle/B"].upload(File.as_pickle(pd.DataFrame(B_true)))
+fig = viz_graph(B_true, size=(7, 7), show=True)
 run["model/params/Graph"].upload(fig)
-fig = viz_heatmap(W_true, size=(5, 4), show=True)
+fig = viz_heatmap(B_true, size=(5, 4), show=True)
 run["model/params/heatmap"].upload(fig)
 #%%
 '''simulate dataset'''
-X = simulate_linear_sem(W_true, params["n"], params["sem_type"], normalize=True)
+X = simulate_nonlinear_sem(B_true, 
+                            params["n"], 
+                            hidden_dims=params["hidden_dims"], 
+                            activation='sigmoid', 
+                            weight_range=(0.5, 2.), 
+                            noise_scale=None)
 n, d = X.shape
 assert n == params["n"]
 assert d == params["d"]
-run["model/data"].upload(File.as_html(pd.DataFrame(X)))
+# run["model/data"].upload(File.as_html(pd.DataFrame(X)))
 run["pickle/data"].upload(File.as_pickle(pd.DataFrame(X)))
 #%%
 def h_fun(W):

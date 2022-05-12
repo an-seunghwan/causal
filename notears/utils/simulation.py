@@ -1,4 +1,5 @@
 #%%
+import torch
 import numpy as np
 import random
 import igraph as ig
@@ -158,6 +159,66 @@ def simulate_linear_sem(W, n, sem_type, noise_scale=None, normalize=True):
     
     if normalize:
         X = X - np.mean(X, axis=0, keepdims=True) # normalize
+    return X
+#%%
+def simulate_nonlinear_sem(B, n, hidden_dims, activation='sigmoid', weight_range=(0.5, 2.), noise_scale=None):
+    """Simulate samples from nonlinear SEM.
+    Args:
+        B (np.ndarray): [d, d] binary adj matrix of DAG
+        n (int): num of samples
+        hidden_dims (list of int): sizes of hidden dimensions in MLP
+        activation (str): non-linear activation in MLP. Defaults to 'sigmoid'.
+        weight_range (tuple): range of MLP weights values. Defaults to (0.5, 2.).
+        noise_scale (np.ndarray): scale parameter of additive noise, default all ones
+        
+    Returns:
+        X (np.ndarray): [n, d] sample matrix
+    """
+    def _simulate_single_equation(x, scale):
+        """
+        input:
+            X: [n, num of parents]
+            scale: noise size
+        output:
+            x: [n]"""
+        
+        z = torch.randn(size=(n, 1)) * scale
+        
+        parent_size = x.shape[1]
+        if parent_size == 0:
+            return z
+        
+        '''generate MLP weights'''
+        low, high = weight_range
+        for h_dim in hidden_dims:
+            weight = torch.FloatTensor(x.shape[1], h_dim).uniform_(low, high)
+            weight[(np.random.rand(weight.shape[0], weight.shape[1]) < 0.5).nonzero()] *= -1 # determine sign
+            bias = torch.FloatTensor(1, h_dim).uniform_(low, high)
+            bias[(np.random.rand(bias.shape[0], bias.shape[1]) < 0.5).nonzero()] *= -1 # determine sign
+            if activation == 'sigmoid':
+                x = torch.sigmoid(x @ weight + bias)
+            elif activation == 'relu':
+                x = torch.relu(x @ weight + bias)
+            elif activation == 'tanh':
+                x = torch.tanh(x @ weight + bias)
+            else:
+                raise ValueError('unknown activation')
+        weight = torch.FloatTensor(x.shape[1], 1).uniform_(low, high)
+        weight[(np.random.rand(weight.shape[0], weight.shape[1]) < 0.5).nonzero()] *= -1 # determine sign
+        bias = torch.FloatTensor(1, 1).uniform_(low, high)
+        bias[(np.random.rand(bias.shape[0], bias.shape[1]) < 0.5).nonzero()] *= -1 # determine sign
+        x = x @ weight + bias
+        return x + z
+    
+    d = B.shape[0]
+    scale_vec = noise_scale if noise_scale else np.ones(d)
+    X = torch.zeros([n, d], requires_grad=False)
+    G = ig.Graph.Adjacency(B.tolist())
+    ordered_vertices = G.topological_sorting()
+    assert len(ordered_vertices) == d
+    for j in ordered_vertices:
+        parents = G.neighbors(j, mode=ig.IN)
+        X[:, [j]] = _simulate_single_equation(X[:, parents], scale_vec[j]) 
     return X
 #%%
 def count_accuracy(B_true, B_est):
