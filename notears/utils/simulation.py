@@ -190,11 +190,14 @@ def simulate_nonlinear_sem(B, n, hidden_dims, activation='sigmoid', weight_range
         
         '''generate MLP weights'''
         low, high = weight_range
-        for h_dim in hidden_dims:
+        for i, h_dim in enumerate(hidden_dims):
             weight = torch.FloatTensor(x.shape[1], h_dim).uniform_(low, high)
             weight[(np.random.rand(weight.shape[0], weight.shape[1]) < 0.5).nonzero()] *= -1 # determine sign
-            bias = torch.FloatTensor(1, h_dim).uniform_(low, high)
-            bias[(np.random.rand(bias.shape[0], bias.shape[1]) < 0.5).nonzero()] *= -1 # determine sign
+            if i == 0:
+                bias = 0.
+            else:
+                bias = torch.FloatTensor(1, h_dim).uniform_(low, high)
+                bias[(np.random.rand(bias.shape[0], bias.shape[1]) < 0.5).nonzero()] *= -1 # determine sign
             if activation == 'sigmoid':
                 x = torch.sigmoid(x @ weight + bias)
             elif activation == 'relu':
@@ -205,10 +208,8 @@ def simulate_nonlinear_sem(B, n, hidden_dims, activation='sigmoid', weight_range
                 raise ValueError('unknown activation')
         weight = torch.FloatTensor(x.shape[1], 1).uniform_(low, high)
         weight[(np.random.rand(weight.shape[0], weight.shape[1]) < 0.5).nonzero()] *= -1 # determine sign
-        bias = torch.FloatTensor(1, 1).uniform_(low, high)
-        bias[(np.random.rand(bias.shape[0], bias.shape[1]) < 0.5).nonzero()] *= -1 # determine sign
-        x = x @ weight + bias
-        return x + z
+        x = x @ weight + z
+        return x
     
     d = B.shape[0]
     scale_vec = noise_scale if noise_scale else np.ones(d)

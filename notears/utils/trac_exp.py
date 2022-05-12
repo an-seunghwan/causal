@@ -30,7 +30,7 @@ class TraceExpm(torch.autograd.Function):
 trace_expm = TraceExpm.apply
 #%%
 def main():
-    W = torch.randn(20, 20, dtype=torch.double, requires_grad=True)
+    W = torch.randn(20, 20, dtype=torch.float, requires_grad=True)
     input = W * W
     assert torch.autograd.gradcheck(trace_expm, input)
 

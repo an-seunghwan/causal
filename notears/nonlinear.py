@@ -7,6 +7,7 @@ np.set_printoptions(precision=3)
 import pandas as pd
 
 import torch
+import torch.nn as nn
 torch.set_default_dtype(torch.float)
 
 from utils.simulation import (
@@ -43,8 +44,9 @@ params = {
     "loss_type": 'l2',
     "max_iter": 100, 
     "h_tol": 1e-8, 
-    "w_threshold": 0.2,
-    "lambda": 0.005,
+    "w_threshold": 0.1,
+    "lambda1": 0.01,
+    "lambda2": 0.05,
     "progress_rate": 0.25,
     "rho_max": 1e+16, 
     "rho_rate": 10.,
@@ -100,34 +102,58 @@ assert d == params["d"]
 # run["model/data"].upload(File.as_html(pd.DataFrame(X)))
 run["pickle/data"].upload(File.as_pickle(pd.DataFrame(X)))
 #%%
-def h_fun(W):
-    """Evaluate DAGness constraint"""
-    h = trace_expm(W * W) - W.shape[0]
-    return h
-#%%
-def loss_function(X, W_est, alpha, rho):
+def loss_function(model, X, alpha, rho, params):
     """Evaluate value and gradient of augmented Lagrangian."""
-    R = X - X.matmul(W_est)
-    # loss = 0.5 / params["n"] * (R ** 2).sum() + params["lambda"] * W_est.abs().sum()
-    loss = 0.5 / params["n"] * (R ** 2).sum() + params["lambda"] * torch.norm(W_est, p=1)
+    R = X - model(X)
+    loss = 0.5 / params["n"] * (R ** 2).sum() + params["lambda1"] * torch.norm(model.W_est, p=1)
     
-    h = h_fun(W_est)
+    h = model.h_fun()
     loss += (0.5 * rho * (h ** 2))
     loss += (alpha * h)
+    
+    for mlp in model.MLP:
+        loss += 0.5 * params["lambda2"] * (mlp.weight ** 2).sum()
     return loss
 #%%
-'''optimization process'''
-X = torch.FloatTensor(X)
+"""model define"""
+class NotearsMLP(nn.Module):
+    def __init__(self, params):
+        super(NotearsMLP, self).__init__()
+        self.params = params
+        self.W_est = nn.Parameter(torch.zeros((self.params["d"], self.params["d"])))
+        in_dim = self.params["d"]
+        dense = []
+        for out_dim in self.params["hidden_dims"] + [1]:
+            if out_dim != 1:
+                dense.append(nn.Linear(in_dim, out_dim))
+            else:
+                dense.append(nn.Linear(in_dim, out_dim, bias=False))
+            in_dim = out_dim
+        self.MLP = nn.ModuleList(dense)
 
-W_est = torch.zeros((params["d"], params["d"]), 
-                    requires_grad=True)
+    def forward(self, x):  # [n, d] -> [n, d]
+        x = x.repeat((1, self.params["d"])) * self.W_est.view(1, -1)
+        x = x.view(self.params["n"] * self.params["d"], self.params["d"])
+        for mlp in self.MLP:
+            x = mlp(x)
+            x = nn.Sigmoid()(x)
+        x = x.view(self.params["n"], self.params["d"])
+        return x
+    
+    def h_fun(self):
+        """Evaluate DAGness constraint"""
+        h = trace_expm(self.W_est * self.W_est) - self.W_est.shape[0]
+        return h
 
+model = NotearsMLP(params)
+#%%
+"""optimization process"""
 # initial values
 rho = params["rho"]
 alpha = params["alpha"]
 h = params["h"]
 
-optimizer = torch.optim.Adam([W_est], lr=params["lr"])
+optimizer = torch.optim.Adam(model.parameters(), lr=params["lr"])
 #%%
 for iteration in range(params["max_iter"]):
     # primal update
@@ -135,11 +161,11 @@ for iteration in range(params["max_iter"]):
     h_old = np.inf
     while True:
         optimizer.zero_grad()
-        loss = loss_function(X, W_est, alpha, rho)
+        loss = loss_function(model, X, alpha, rho, params)
         loss.backward()
         optimizer.step()
         
-        h_new = h_fun(W_est).item()
+        h_new = model.h_fun().item()
         if h_new < params["progress_rate"] * h: 
             break
         elif abs(h_old - h_new) < 1e-8: # no change in weight estimation
@@ -173,8 +199,9 @@ for iteration in range(params["max_iter"]):
         iteration, loss.item(), h, count))
 #%%
 """chech DAGness of estimated weighted graph"""
-W_est = W_est.detach().numpy().astype(float).round(2)
+W_est = model.W_est.detach().numpy().astype(float).round(2)
 W_est[np.abs(W_est) < params["w_threshold"]] = 0.
+B_est = (W_est != 0).astype(float)
 
 fig = viz_graph(W_est, size=(7, 7), show=True)
 run["result/Graph_est"].upload(fig)
@@ -184,17 +211,11 @@ run["result/heatmap_est"].upload(fig)
 run["result/Is DAG?"] = is_dag(W_est)
 run["result/W_est"].upload(File.as_html(pd.DataFrame(W_est)))
 run["pickle/W_est"].upload(File.as_pickle(pd.DataFrame(W_est)))
-run["result/W_diff"].upload(File.as_html(pd.DataFrame(W_true - W_est)))
-
-W_ = (W_true != 0).astype(float)
-W_est_ = (W_est != 0).astype(float)
-W_diff_ = np.abs(W_ - W_est_)
-
-fig = viz_graph(W_diff_, size=(7, 7), show=True)
+run["result/W_diff"].upload(File.as_html(pd.DataFrame(B_true - B_est)))
+fig = viz_graph(np.abs(B_true - B_est), size=(7, 7), show=True)
 run["result/Graph_diff"].upload(fig)
 #%%
 """accuracy"""
-B_est = (W_est != 0).astype(float)
 acc = count_accuracy(B_true, B_est)
 run["result/accuracy"] = acc
 #%%
