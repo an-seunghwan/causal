@@ -23,7 +23,7 @@ class TraceExpm(torch.autograd.Function):
         grad_output: gradient of input(= W * W) = 2 * W
         E: trace(exp(input)) saved from forward
         """
-        E, = ctx.saved_tensors
+        E, = ctx.saved_tensors # dtype: tuple
         grad_input = E.t() * grad_output
         return grad_input
 
