@@ -3,18 +3,16 @@ import os
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 #%%
 import numpy as np
-np.set_printoptions(precision=3)
 import pandas as pd
 
 import torch
-import torch.nn as nn
-torch.set_default_dtype(torch.float)
 
 from utils.simulation import (
     is_dag,
     set_random_seed,
     simulate_dag,
-    simulate_nonlinear_sem,
+    simulate_parameter,
+    simulate_linear_sem,
     count_accuracy,
 )
 
@@ -29,12 +27,11 @@ params = {
     # "neptune": True, # True if you use neptune.ai
     
     "seed": 10,
-    "n": 200,
-    "d": 5,
-    "s0": 9,
+    "n": 1000,
+    "d": 7,
+    "s0": 7,
     "graph_type": 'ER',
-    "sem_type": 'mlp', # only mlp
-    "hidden_dims": [16, 32],
+    "sem_type": 'gauss',
     
     "rho": 1, # initial value
     "alpha": 0., # initial value
@@ -44,20 +41,19 @@ params = {
     "loss_type": 'l2',
     "max_iter": 100, 
     "h_tol": 1e-8, 
-    "w_threshold": 0.1,
-    "lambda1": 0.01,
-    "lambda2": 0.05,
+    "w_threshold": 0.2,
+    "lambda": 0.005,
     "progress_rate": 0.25,
     "rho_max": 1e+16, 
     "rho_rate": 10.,
 }
 #%%
-import sys
-import subprocess
 # if params['neptune']:
 try:
     import neptune.new as neptune
 except:
+    import sys
+    import subprocess
     subprocess.check_call([sys.executable, "-m", "pip", "install", "neptune-client"])
     import neptune.new as neptune
 
@@ -67,97 +63,65 @@ with open("../neptune_api.txt", "r") as f:
     key = f.readlines()
 
 run = neptune.init(
-    project="seunghwan/causal",
+    project="an-seunghwan/causal",
     api_token=key[0],
-    mode="offline",
     # run="",
-)
+)  
 
 run["sys/name"] = "causal_notears_experiment"
-run["sys/tags"].add(["notears", "nonlinear", "torch"])
+run["sys/tags"].add(["notears", "linear", "torch"])
 run["model/params"] = params
-# run_id = run["sys/id"].fetch()
-# run["sys/id"].assign('notears1')
+
 # model_version["model/environment"].upload("environment.yml")
 #%%
 '''simulate DAG and weighted adjacency matrix'''
 set_random_seed(params["seed"])
 B_true = simulate_dag(params["d"], params["s0"], params["graph_type"])
+W_true = simulate_parameter(B_true)
 
-run["model/params/B"].upload(File.as_html(pd.DataFrame(B_true)))
-run["pickle/B"].upload(File.as_pickle(pd.DataFrame(B_true)))
-fig = viz_graph(B_true, size=(7, 7), show=True)
+run["model/params/W"].upload(File.as_html(pd.DataFrame(W_true)))
+run["pickle/W"].upload(File.as_pickle(pd.DataFrame(W_true)))
+fig = viz_graph(W_true, size=(7, 7), show=True)
 run["model/params/Graph"].upload(fig)
-fig = viz_heatmap(B_true, size=(5, 4), show=True)
+fig = viz_heatmap(W_true, size=(5, 4), show=True)
 run["model/params/heatmap"].upload(fig)
 #%%
 '''simulate dataset'''
-X = simulate_nonlinear_sem(B_true, 
-                            params["n"], 
-                            hidden_dims=params["hidden_dims"], 
-                            activation='sigmoid', 
-                            weight_range=(0.5, 2.), 
-                            noise_scale=None)
+X = simulate_linear_sem(W_true, params["n"], params["sem_type"], normalize=True)
 n, d = X.shape
 assert n == params["n"]
 assert d == params["d"]
-# run["model/data"].upload(File.as_html(pd.DataFrame(X)))
+run["model/data"].upload(File.as_html(pd.DataFrame(X)))
 run["pickle/data"].upload(File.as_pickle(pd.DataFrame(X)))
 #%%
-def loss_function(model, X, alpha, rho, params):
+def h_fun(W):
+    """Evaluate DAGness constraint"""
+    h = trace_expm(W * W) - W.shape[0]
+    return h
+#%%
+def loss_function(X, W_est, alpha, rho):
     """Evaluate value and gradient of augmented Lagrangian."""
-    R = X - model(X)
-    loss = 0.5 / params["n"] * (R ** 2).sum() + params["lambda1"] * torch.norm(model.W_est, p=1)
+    R = X - X.matmul(W_est)
+    # loss = 0.5 / params["n"] * (R ** 2).sum() + params["lambda"] * W_est.abs().sum()
+    loss = 0.5 / params["n"] * (R ** 2).sum() + params["lambda"] * torch.norm(W_est, p=1)
     
-    h = model.h_fun()
+    h = h_fun(W_est)
     loss += (0.5 * rho * (h ** 2))
     loss += (alpha * h)
-    
-    for mlp in model.MLP:
-        loss += 0.5 * params["lambda2"] * (mlp.weight ** 2).sum()
     return loss
 #%%
-"""model define"""
-class NotearsMLP(nn.Module):
-    def __init__(self, params):
-        super(NotearsMLP, self).__init__()
-        self.params = params
-        self.W_est = nn.Parameter(torch.zeros((self.params["d"], self.params["d"])))
-        
-        in_dim = self.params["d"]
-        dense = []
-        for out_dim in self.params["hidden_dims"] + [1]:
-            if out_dim != 1:
-                dense.append(nn.Linear(in_dim, out_dim))
-            else:
-                dense.append(nn.Linear(in_dim, out_dim, bias=False))
-            in_dim = out_dim
-        self.MLP = nn.ModuleList(dense)
+'''optimization process'''
+X = torch.FloatTensor(X)
 
-    def forward(self, x):  # [n, d] -> [n, d]
-        w_est = torch.transpose(self.W_est, 0, 1)
-        x = x.repeat((1, self.params["d"])) * w_est.reshape(1, -1)
-        x = x.view(self.params["n"] * self.params["d"], self.params["d"])
-        for mlp in self.MLP:
-            x = mlp(x)
-            x = nn.Sigmoid()(x)
-        x = x.view(self.params["n"], self.params["d"])
-        return x
-    
-    def h_fun(self):
-        """Evaluate DAGness constraint"""
-        h = trace_expm(self.W_est * self.W_est) - self.W_est.shape[0]
-        return h
+W_est = torch.zeros((params["d"], params["d"]), 
+                    requires_grad=True)
 
-model = NotearsMLP(params)
-#%%
-"""optimization process"""
 # initial values
 rho = params["rho"]
 alpha = params["alpha"]
 h = params["h"]
 
-optimizer = torch.optim.Adam(model.parameters(), lr=params["lr"])
+optimizer = torch.optim.Adam([W_est], lr=params["lr"])
 #%%
 for iteration in range(params["max_iter"]):
     # primal update
@@ -165,11 +129,11 @@ for iteration in range(params["max_iter"]):
     h_old = np.inf
     while True:
         optimizer.zero_grad()
-        loss = loss_function(model, X, alpha, rho, params)
+        loss = loss_function(X, W_est, alpha, rho)
         loss.backward()
         optimizer.step()
         
-        h_new = model.h_fun().item()
+        h_new = h_fun(W_est).item()
         if h_new < params["progress_rate"] * h: 
             break
         elif abs(h_old - h_new) < 1e-8: # no change in weight estimation
@@ -192,7 +156,7 @@ for iteration in range(params["max_iter"]):
     # stopping rules
     if h <= params["h_tol"] or rho >= params["rho_max"]: 
         break
-    
+   
     """update log"""
     run["train/iteration/h"].log(h)
     run["train/iteration/alpha"].log(alpha)
@@ -203,9 +167,8 @@ for iteration in range(params["max_iter"]):
         iteration, loss.item(), h, count))
 #%%
 """chech DAGness of estimated weighted graph"""
-W_est = model.W_est.detach().numpy().astype(float).round(2)
+W_est = W_est.detach().numpy().astype(float).round(2)
 W_est[np.abs(W_est) < params["w_threshold"]] = 0.
-B_est = (W_est != 0).astype(float)
 
 fig = viz_graph(W_est, size=(7, 7), show=True)
 run["result/Graph_est"].upload(fig)
@@ -215,18 +178,19 @@ run["result/heatmap_est"].upload(fig)
 run["result/Is DAG?"] = is_dag(W_est)
 run["result/W_est"].upload(File.as_html(pd.DataFrame(W_est)))
 run["pickle/W_est"].upload(File.as_pickle(pd.DataFrame(W_est)))
-run["result/W_diff"].upload(File.as_html(pd.DataFrame(B_true - B_est)))
-fig = viz_graph(np.abs(B_true - B_est), size=(7, 7), show=True)
+run["result/W_diff"].upload(File.as_html(pd.DataFrame(W_true - W_est)))
+
+W_ = (W_true != 0).astype(float)
+W_est_ = (W_est != 0).astype(float)
+W_diff_ = np.abs(W_ - W_est_)
+
+fig = viz_graph(W_diff_, size=(7, 7), show=True)
 run["result/Graph_diff"].upload(fig)
 #%%
 """accuracy"""
+B_est = (W_est != 0).astype(float)
 acc = count_accuracy(B_true, B_est)
 run["result/accuracy"] = acc
-#%%
-os.environ["NEPTUNE_API_TOKEN"] = key[0]
-tmp = os.listdir(".neptune/offline")[0]
-cmd = f"neptune sync -p seunghwan/causal —-run offline/{tmp}"
-subprocess.check_output(cmd, shell=True)
 #%%
 run.stop()
 #%%

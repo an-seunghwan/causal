@@ -1,4 +1,6 @@
 .DS_Store
 .neptune
 neptune_api.txt
+wandb_api.txt
 *.pyc
+wandb

@@ -23,9 +23,7 @@ from utils.viz import (
 
 from utils.trac_exp import trace_expm
 #%%
-params = {
-    # "neptune": True, # True if you use neptune.ai
-    
+config = {
     "seed": 10,
     "n": 1000,
     "d": 7,
@@ -48,51 +46,41 @@ params = {
     "rho_rate": 10.,
 }
 #%%
-# if params['neptune']:
+import sys
+import subprocess
 try:
-    import neptune.new as neptune
+    import wandb
 except:
-    import sys
-    import subprocess
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "neptune-client"])
-    import neptune.new as neptune
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "wandb"])
+    with open("../wandb_api.txt", "r") as f:
+        key = f.readlines()
+    subprocess.run(["wandb", "login"], input=key[0], encoding='utf-8')
+    import wandb
 
-from neptune.new.types import File
-
-with open("../neptune_api.txt", "r") as f:
-    key = f.readlines()
-
-run = neptune.init(
-    project="an-seunghwan/causal",
-    api_token=key[0],
-    # run="",
-)  
-
-run["sys/name"] = "causal_notears_experiment"
-run["sys/tags"].add(["notears", "linear", "torch"])
-run["model/params"] = params
-
-# model_version["model/environment"].upload("environment.yml")
+wandb.init(project="causal", 
+            entity="anseunghwan",
+            tags=["notears", "linear", "torch"],
+            name='notears')
+#%%
+wandb.config = config
 #%%
 '''simulate DAG and weighted adjacency matrix'''
-set_random_seed(params["seed"])
-B_true = simulate_dag(params["d"], params["s0"], params["graph_type"])
+set_random_seed(config["seed"])
+B_true = simulate_dag(config["d"], config["s0"], config["graph_type"])
 W_true = simulate_parameter(B_true)
 
-run["model/params/W"].upload(File.as_html(pd.DataFrame(W_true)))
-run["pickle/W"].upload(File.as_pickle(pd.DataFrame(W_true)))
+wandb.run.summary['W_true'] = wandb.Table(data=pd.DataFrame(W_true))
 fig = viz_graph(W_true, size=(7, 7), show=True)
-run["model/params/Graph"].upload(fig)
+wandb.run.summary['Graph'] = wandb.Image(fig)
 fig = viz_heatmap(W_true, size=(5, 4), show=True)
-run["model/params/heatmap"].upload(fig)
+wandb.run.summary['heatmap'] = wandb.Image(fig)
 #%%
 '''simulate dataset'''
-X = simulate_linear_sem(W_true, params["n"], params["sem_type"], normalize=True)
+X = simulate_linear_sem(W_true, config["n"], config["sem_type"], normalize=True)
 n, d = X.shape
-assert n == params["n"]
-assert d == params["d"]
-run["model/data"].upload(File.as_html(pd.DataFrame(X)))
-run["pickle/data"].upload(File.as_pickle(pd.DataFrame(X)))
+assert n == config["n"]
+assert d == config["d"]
+wandb.run.summary['data'] = wandb.Table(data=pd.DataFrame(X))
 #%%
 def h_fun(W):
     """Evaluate DAGness constraint"""
@@ -102,8 +90,7 @@ def h_fun(W):
 def loss_function(X, W_est, alpha, rho):
     """Evaluate value and gradient of augmented Lagrangian."""
     R = X - X.matmul(W_est)
-    # loss = 0.5 / params["n"] * (R ** 2).sum() + params["lambda"] * W_est.abs().sum()
-    loss = 0.5 / params["n"] * (R ** 2).sum() + params["lambda"] * torch.norm(W_est, p=1)
+    loss = 0.5 / config["n"] * (R ** 2).sum() + config["lambda"] * torch.norm(W_est, p=1)
     
     h = h_fun(W_est)
     loss += (0.5 * rho * (h ** 2))
@@ -113,17 +100,17 @@ def loss_function(X, W_est, alpha, rho):
 '''optimization process'''
 X = torch.FloatTensor(X)
 
-W_est = torch.zeros((params["d"], params["d"]), 
+W_est = torch.zeros((config["d"], config["d"]), 
                     requires_grad=True)
 
 # initial values
-rho = params["rho"]
-alpha = params["alpha"]
-h = params["h"]
+rho = config["rho"]
+alpha = config["alpha"]
+h = config["h"]
 
-optimizer = torch.optim.Adam([W_est], lr=params["lr"])
+optimizer = torch.optim.Adam([W_est], lr=config["lr"])
 #%%
-for iteration in range(params["max_iter"]):
+for iteration in range(config["max_iter"]):
     # primal update
     count = 0
     h_old = np.inf
@@ -134,63 +121,61 @@ for iteration in range(params["max_iter"]):
         optimizer.step()
         
         h_new = h_fun(W_est).item()
-        if h_new < params["progress_rate"] * h: 
+        if h_new < config["progress_rate"] * h: 
             break
         elif abs(h_old - h_new) < 1e-8: # no change in weight estimation
-            if rho >= params["rho_max"]:
+            if rho >= config["rho_max"]:
                 break
             else:
-                rho *= params["rho_rate"]
+                rho *= config["rho_rate"]
         h_old = h_new
             
         count += 1
         if count % 10 == 0:
             """update log"""
-            run["train/inner_loop/h_new"].log(h_new)
-            run["train/inner_loop/loss"].log(loss.item())
+            wandb.log({"inner_loop/h_new": h_new})
+            wandb.log({"inner_loop/loss": loss.item()})
         
     # update
     h = h_new
     # dual ascent step
     alpha += rho * h
     # stopping rules
-    if h <= params["h_tol"] or rho >= params["rho_max"]: 
+    if h <= config["h_tol"] or rho >= config["rho_max"]: 
         break
    
     """update log"""
-    run["train/iteration/h"].log(h)
-    run["train/iteration/alpha"].log(alpha)
-    run["train/iteration/loss"].log(loss.item())
-    # run["train/iteration/rho"].log(rho)
+    wandb.log({"train/h": h})
+    wandb.log({"train/alpha": alpha})
+    wandb.log({"train/loss": loss.item()})
     
     print('[iteration {:03d}]: loss: {:.4f}, h(W): {:.4f}, primal update: {:04d}'.format(
         iteration, loss.item(), h, count))
 #%%
 """chech DAGness of estimated weighted graph"""
 W_est = W_est.detach().numpy().astype(float).round(2)
-W_est[np.abs(W_est) < params["w_threshold"]] = 0.
+W_est[np.abs(W_est) < config["w_threshold"]] = 0.
 
 fig = viz_graph(W_est, size=(7, 7), show=True)
-run["result/Graph_est"].upload(fig)
+wandb.run.summary['result/Graph_est'] = wandb.Image(fig)
 fig = viz_heatmap(W_est, size=(5, 4), show=True)
-run["result/heatmap_est"].upload(fig)
+wandb.run.summary['result/heatmap_est'] = wandb.Image(fig)
 
-run["result/Is DAG?"] = is_dag(W_est)
-run["result/W_est"].upload(File.as_html(pd.DataFrame(W_est)))
-run["pickle/W_est"].upload(File.as_pickle(pd.DataFrame(W_est)))
-run["result/W_diff"].upload(File.as_html(pd.DataFrame(W_true - W_est)))
+wandb.run.summary['IsDAG?'] = is_dag(W_est)
+wandb.run.summary['result/W_est'] = wandb.Table(data=pd.DataFrame(W_est))
+wandb.run.summary['result/W_diff'] = wandb.Table(data=pd.DataFrame(W_true - W_est))
 
 W_ = (W_true != 0).astype(float)
 W_est_ = (W_est != 0).astype(float)
 W_diff_ = np.abs(W_ - W_est_)
 
 fig = viz_graph(W_diff_, size=(7, 7), show=True)
-run["result/Graph_diff"].upload(fig)
+wandb.run.summary['result/Graph_diff'] = wandb.Image(fig)
 #%%
 """accuracy"""
 B_est = (W_est != 0).astype(float)
 acc = count_accuracy(B_true, B_est)
-run["result/accuracy"] = acc
+wandb.run.summary['acc'] = acc
 #%%
-run.stop()
+wandb.run.finish()
 #%%
