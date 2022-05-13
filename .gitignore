@@ -4,3 +4,4 @@ neptune_api.txt
 wandb_api.txt
 *.pyc
 wandb
+etc

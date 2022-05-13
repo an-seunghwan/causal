@@ -61,7 +61,7 @@ wandb.init(project="causal",
             entity="anseunghwan",
             tags=["notears", "linear", "torch"],
             name='notears')
-#%%
+
 wandb.config = config
 #%%
 '''simulate DAG and weighted adjacency matrix'''
@@ -71,9 +71,11 @@ W_true = simulate_parameter(B_true)
 
 wandb.run.summary['W_true'] = wandb.Table(data=pd.DataFrame(W_true))
 fig = viz_graph(W_true, size=(7, 7), show=True)
-wandb.run.summary['Graph'] = wandb.Image(fig)
+# wandb.run.summary['Graph'] = wandb.Image(fig)
+wandb.log({'Graph': wandb.Image(fig)})
 fig = viz_heatmap(W_true, size=(5, 4), show=True)
-wandb.run.summary['heatmap'] = wandb.Image(fig)
+wandb.log({'heatmap': wandb.Image(fig)})
+# wandb.run.summary['heatmap'] = wandb.Image(fig)
 #%%
 '''simulate dataset'''
 X = simulate_linear_sem(W_true, config["n"], config["sem_type"], normalize=True)
@@ -157,20 +159,23 @@ W_est = W_est.detach().numpy().astype(float).round(2)
 W_est[np.abs(W_est) < config["w_threshold"]] = 0.
 
 fig = viz_graph(W_est, size=(7, 7), show=True)
-wandb.run.summary['result/Graph_est'] = wandb.Image(fig)
+# wandb.run.summary['Graph_est'] = wandb.Image(fig)
+wandb.log({'Graph_est': wandb.Image(fig)})
 fig = viz_heatmap(W_est, size=(5, 4), show=True)
-wandb.run.summary['result/heatmap_est'] = wandb.Image(fig)
+# wandb.run.summary['heatmap_est'] = wandb.Image(fig)
+wandb.log({'heatmap_est': wandb.Image(fig)})
 
 wandb.run.summary['IsDAG?'] = is_dag(W_est)
-wandb.run.summary['result/W_est'] = wandb.Table(data=pd.DataFrame(W_est))
-wandb.run.summary['result/W_diff'] = wandb.Table(data=pd.DataFrame(W_true - W_est))
+wandb.run.summary['W_est'] = wandb.Table(data=pd.DataFrame(W_est))
+wandb.run.summary['W_diff'] = wandb.Table(data=pd.DataFrame(W_true - W_est))
 
 W_ = (W_true != 0).astype(float)
 W_est_ = (W_est != 0).astype(float)
 W_diff_ = np.abs(W_ - W_est_)
 
 fig = viz_graph(W_diff_, size=(7, 7), show=True)
-wandb.run.summary['result/Graph_diff'] = wandb.Image(fig)
+# wandb.run.summary['Graph_diff'] = wandb.Image(fig)
+wandb.log({'Graph_diff': wandb.Image(fig)})
 #%%
 """accuracy"""
 B_est = (W_est != 0).astype(float)
