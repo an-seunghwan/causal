@@ -24,10 +24,10 @@ from utils.viz import (
 )
 
 from utils.trac_exp import trace_expm
+
+wandb.init(project="causal", entity="anseunghwan", resume=True)
 #%%
-params = {
-    # "neptune": True, # True if you use neptune.ai
-    
+config = {
     "seed": 10,
     "n": 200,
     "d": 5,
@@ -45,8 +45,8 @@ params = {
     "max_iter": 100, 
     "h_tol": 1e-8, 
     "w_threshold": 0.1,
-    "lambda1": 0.01,
-    "lambda2": 0.05,
+    "lambda1": 0.001,
+    "lambda2": 0.001,
     "progress_rate": 0.25,
     "rho_max": 1e+16, 
     "rho_rate": 10.,
@@ -54,179 +54,165 @@ params = {
 #%%
 import sys
 import subprocess
-# if params['neptune']:
 try:
-    import neptune.new as neptune
+    import wandb
 except:
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "neptune-client"])
-    import neptune.new as neptune
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "wandb"])
+    with open("../wandb_api.txt", "r") as f:
+        key = f.readlines()
+    subprocess.run(["wandb", "login"], input=key[0], encoding='utf-8')
+    import wandb
 
-from neptune.new.types import File
+wandb.init(project="causal", 
+            entity="anseunghwan",
+            tags=["notears", "nonlinear", "torch"])
 
-with open("../neptune_api.txt", "r") as f:
-    key = f.readlines()
-
-run = neptune.init(
-    project="seunghwan/causal",
-    api_token=key[0],
-    mode="offline",
-    # run="",
-)
-
-run["sys/name"] = "causal_notears_experiment"
-run["sys/tags"].add(["notears", "nonlinear", "torch"])
-run["model/params"] = params
-# run_id = run["sys/id"].fetch()
-# run["sys/id"].assign('notears1')
-# model_version["model/environment"].upload("environment.yml")
+wandb.config = config
 #%%
 '''simulate DAG and weighted adjacency matrix'''
-set_random_seed(params["seed"])
-B_true = simulate_dag(params["d"], params["s0"], params["graph_type"])
+set_random_seed(config["seed"])
+B_true = simulate_dag(config["d"], config["s0"], config["graph_type"])
 
-run["model/params/B"].upload(File.as_html(pd.DataFrame(B_true)))
-run["pickle/B"].upload(File.as_pickle(pd.DataFrame(B_true)))
-fig = viz_graph(B_true, size=(7, 7), show=True)
-run["model/params/Graph"].upload(fig)
-fig = viz_heatmap(B_true, size=(5, 4), show=True)
-run["model/params/heatmap"].upload(fig)
+wandb.run.summary['B_true'] = wandb.Table(data=pd.DataFrame(B_true))
+fig = viz_graph(B_true, size=(7, 7))
+wandb.log({'Graph': wandb.Image(fig)})
+fig = viz_heatmap(B_true, size=(5, 4))
+wandb.log({'heatmap': wandb.Image(fig)})
 #%%
 '''simulate dataset'''
 X = simulate_nonlinear_sem(B_true, 
-                            params["n"], 
-                            hidden_dims=params["hidden_dims"], 
+                            config["n"], 
+                            hidden_dims=config["hidden_dims"], 
                             activation='sigmoid', 
                             weight_range=(0.5, 2.), 
                             noise_scale=None)
 n, d = X.shape
-assert n == params["n"]
-assert d == params["d"]
-# run["model/data"].upload(File.as_html(pd.DataFrame(X)))
-run["pickle/data"].upload(File.as_pickle(pd.DataFrame(X)))
+assert n == config["n"]
+assert d == config["d"]
+wandb.run.summary['data'] = wandb.Table(data=pd.DataFrame(X))
 #%%
-def loss_function(model, X, alpha, rho, params):
+def loss_function(model, X, alpha, rho, config):
     """Evaluate value and gradient of augmented Lagrangian."""
     R = X - model(X)
-    loss = 0.5 / params["n"] * (R ** 2).sum() + params["lambda1"] * torch.norm(model.W_est, p=1)
+    loss = 0.5 / config["n"] * (R ** 2).sum() + config["lambda1"] * torch.norm(model.W_est, p=1)
     
     h = model.h_fun()
     loss += (0.5 * rho * (h ** 2))
     loss += (alpha * h)
     
     for mlp in model.MLP:
-        loss += 0.5 * params["lambda2"] * (mlp.weight ** 2).sum()
+        for dense in mlp:
+            loss += 0.5 * config["lambda2"] * torch.norm(dense.weight, p=2)
+    loss += 0.5 * config["lambda2"] * torch.norm(model.W_est, p=2)
     return loss
 #%%
 """model define"""
 class NotearsMLP(nn.Module):
-    def __init__(self, params):
+    def __init__(self, config):
         super(NotearsMLP, self).__init__()
-        self.params = params
-        self.W_est = nn.Parameter(torch.zeros((self.params["d"], self.params["d"])))
+        self.config = config
+        self.W_est = nn.Parameter(torch.zeros((self.config["d"], self.config["d"])))
         
-        in_dim = self.params["d"]
-        dense = []
-        for out_dim in self.params["hidden_dims"] + [1]:
-            if out_dim != 1:
-                dense.append(nn.Linear(in_dim, out_dim))
-            else:
-                dense.append(nn.Linear(in_dim, out_dim, bias=False))
-            in_dim = out_dim
-        self.MLP = nn.ModuleList(dense)
+        in_dim = self.config["d"]
+        self.MLP = []
+        for j in range(self.config["d"]):
+            dense = []
+            for out_dim in self.config["hidden_dims"] + [1]:
+                if out_dim != 1:
+                    dense.append(nn.Linear(in_dim, out_dim))
+                else:
+                    dense.append(nn.Linear(in_dim, out_dim, bias=False))
+                in_dim = out_dim
+            self.MLP.append(nn.ModuleList(dense))
+            in_dim = self.config["d"]
 
     def forward(self, x):  # [n, d] -> [n, d]
-        w_est = torch.transpose(self.W_est, 0, 1)
-        x = x.repeat((1, self.params["d"])) * w_est.reshape(1, -1)
-        x = x.view(self.params["n"] * self.params["d"], self.params["d"])
-        for mlp in self.MLP:
-            x = mlp(x)
-            x = nn.Sigmoid()(x)
-        x = x.view(self.params["n"], self.params["d"])
-        return x
+        w_split = torch.split(self.W_est, 1, dim=1)
+        result = []
+        for j in range(config["d"]):
+            h = x * w_split[j].t()
+            for mlp in self.MLP[j]:
+                h = mlp(h)
+                h = nn.Sigmoid()(h)
+            result.append(h)
+        return torch.cat(result, dim=1)
     
     def h_fun(self):
         """Evaluate DAGness constraint"""
         h = trace_expm(self.W_est * self.W_est) - self.W_est.shape[0]
         return h
 
-model = NotearsMLP(params)
+model = NotearsMLP(config)
 #%%
 """optimization process"""
 # initial values
-rho = params["rho"]
-alpha = params["alpha"]
-h = params["h"]
+rho = config["rho"]
+alpha = config["alpha"]
+h = config["h"]
 
-optimizer = torch.optim.Adam(model.parameters(), lr=params["lr"])
+optimizer = torch.optim.Adam(model.parameters(), lr=config["lr"])
 #%%
-for iteration in range(params["max_iter"]):
+for iteration in range(config["max_iter"]):
     # primal update
     count = 0
     h_old = np.inf
     while True:
         optimizer.zero_grad()
-        loss = loss_function(model, X, alpha, rho, params)
+        loss = loss_function(model, X, alpha, rho, config)
         loss.backward()
         optimizer.step()
         
         h_new = model.h_fun().item()
-        if h_new < params["progress_rate"] * h: 
+        if h_new < config["progress_rate"] * h: 
             break
         elif abs(h_old - h_new) < 1e-8: # no change in weight estimation
-            if rho >= params["rho_max"]:
+            if rho >= config["rho_max"]:
                 break
             else:
-                rho *= params["rho_rate"]
+                rho *= config["rho_rate"]
         h_old = h_new
             
         count += 1
         if count % 10 == 0:
             """update log"""
-            run["train/inner_loop/h_new"].log(h_new)
-            run["train/inner_loop/loss"].log(loss.item())
+            wandb.log({"inner_loop/h_new": h_new})
+            wandb.log({"inner_loop/loss": loss.item()})
         
     # update
     h = h_new
     # dual ascent step
     alpha += rho * h
     # stopping rules
-    if h <= params["h_tol"] or rho >= params["rho_max"]: 
+    if h <= config["h_tol"] or rho >= config["rho_max"]: 
         break
     
     """update log"""
-    run["train/iteration/h"].log(h)
-    run["train/iteration/alpha"].log(alpha)
-    run["train/iteration/loss"].log(loss.item())
-    # run["train/iteration/rho"].log(rho)
+    wandb.log({"train/h": h})
+    wandb.log({"train/alpha": alpha})
+    wandb.log({"train/loss": loss.item()})
     
     print('[iteration {:03d}]: loss: {:.4f}, h(W): {:.4f}, primal update: {:04d}'.format(
         iteration, loss.item(), h, count))
 #%%
 """chech DAGness of estimated weighted graph"""
 W_est = model.W_est.detach().numpy().astype(float).round(2)
-W_est[np.abs(W_est) < params["w_threshold"]] = 0.
+W_est[np.abs(W_est) < config["w_threshold"]] = 0.
 B_est = (W_est != 0).astype(float)
 
-fig = viz_graph(W_est, size=(7, 7), show=True)
-run["result/Graph_est"].upload(fig)
-fig = viz_heatmap(W_est, size=(5, 4), show=True)
-run["result/heatmap_est"].upload(fig)
+fig = viz_graph(W_est, size=(7, 7))
+wandb.log({'Graph_est': wandb.Image(fig)})
+fig = viz_heatmap(W_est, size=(5, 4))
+wandb.log({'heatmap_est': wandb.Image(fig)})
 
-run["result/Is DAG?"] = is_dag(W_est)
-run["result/W_est"].upload(File.as_html(pd.DataFrame(W_est)))
-run["pickle/W_est"].upload(File.as_pickle(pd.DataFrame(W_est)))
-run["result/W_diff"].upload(File.as_html(pd.DataFrame(B_true - B_est)))
-fig = viz_graph(np.abs(B_true - B_est), size=(7, 7), show=True)
-run["result/Graph_diff"].upload(fig)
+wandb.run.summary['IsDAG?'] = is_dag(W_est)
+wandb.run.summary['W_est'] = wandb.Table(data=pd.DataFrame(W_est))
+wandb.run.summary['W_diff'] = wandb.Table(data=pd.DataFrame(B_true - B_est))
+fig = viz_graph(np.abs(B_true - B_est), size=(7, 7))
+wandb.log({'Graph_diff': wandb.Image(fig)})
 #%%
 """accuracy"""
 acc = count_accuracy(B_true, B_est)
-run["result/accuracy"] = acc
+wandb.run.summary['acc'] = acc
 #%%
-os.environ["NEPTUNE_API_TOKEN"] = key[0]
-tmp = os.listdir(".neptune/offline")[0]
-cmd = f"neptune sync -p seunghwan/causal —-run offline/{tmp}"
-subprocess.check_output(cmd, shell=True)
-#%%
-run.stop()
+wandb.run.finish()
 #%%

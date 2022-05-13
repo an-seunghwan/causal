@@ -2,7 +2,6 @@
 import matplotlib.pyplot as plt
 
 import networkx as nx
-import igraph as ig
 #%%
 def viz_graph(W, size=(6, 6), show=False):
     """visualize weighted adj matrix of DAG"""
