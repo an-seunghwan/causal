@@ -25,7 +25,7 @@ from utils.trac_exp import trace_expm
 #%%
 config = {
     "seed": 10,
-    "n": 5050,
+    "n": 1000,
     "d": 5,
     "s0": 8,
     "graph_type": 'ER',
@@ -43,7 +43,7 @@ config = {
     "lambda": 0.005,
     "progress_rate": 0.25,
     "rho_max": 1e+16, 
-    "rho_rate": 10.,
+    "rho_rate": 2.,
 }
 #%%
 import sys
@@ -137,8 +137,14 @@ for iteration in range(config["max_iter"]):
         count += 1
         if count % 10 == 0:
             """update log"""
-            wandb.log({"inner_loop/h_new": h_new})
-            wandb.log({"inner_loop/loss": loss.item()})
+            wandb.log(
+                {
+                    "inner_step": count,
+                    "inner_loop/h": h_new,
+                    "inner_loop/rho": rho,
+                    "inner_loop/loss": loss.item()
+                }
+            )
         
     # update
     h = h_new
@@ -149,9 +155,15 @@ for iteration in range(config["max_iter"]):
         break
    
     """update log"""
-    wandb.log({"train/h": h})
-    wandb.log({"train/alpha": alpha})
-    wandb.log({"train/loss": loss.item()})
+    wandb.log(
+        {
+            "iteration": iteration,
+            "train/h": h,
+            "train/rho": rho,
+            "train/alpha": alpha,
+            "train/loss": loss.item()
+        }
+    )
     
     print('[iteration {:03d}]: loss: {:.4f}, h(W): {:.4f}, primal update: {:04d}'.format(
         iteration, loss.item(), h, count))
