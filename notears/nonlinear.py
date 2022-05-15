@@ -24,14 +24,12 @@ from utils.viz import (
 )
 
 from utils.trac_exp import trace_expm
-
-wandb.init(project="causal", entity="anseunghwan", resume=True)
 #%%
 config = {
     "seed": 10,
     "n": 200,
     "d": 5,
-    "s0": 9,
+    "s0": 5,
     "graph_type": 'ER',
     "sem_type": 'mlp', # only mlp
     "hidden_dims": [16, 32],
