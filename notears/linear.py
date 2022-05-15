@@ -24,8 +24,8 @@ from utils.viz import (
 from utils.trac_exp import trace_expm
 #%%
 config = {
-    "seed": 10,
-    "n": 1000,
+    "seed": 520,
+    "n": 500,
     "d": 7,
     "s0": 7,
     "graph_type": 'ER',
@@ -57,10 +57,12 @@ except:
     subprocess.run(["wandb", "login"], input=key[0], encoding='utf-8')
     import wandb
 
-wandb.init(project="causal", 
-            entity="anseunghwan",
-            tags=["notears", "linear", "torch"],
-            name='notears')
+wandb.init(
+    project="causal", 
+    entity="anseunghwan",
+    tags=["notears", "linear", "torch"],
+    # name='notears'
+)
 
 wandb.config = config
 #%%
@@ -70,10 +72,10 @@ B_true = simulate_dag(config["d"], config["s0"], config["graph_type"])
 W_true = simulate_parameter(B_true)
 
 wandb.run.summary['W_true'] = wandb.Table(data=pd.DataFrame(W_true))
-fig = viz_graph(W_true, size=(7, 7), show=True)
+fig = viz_graph(W_true, size=(7, 7))
 # wandb.run.summary['Graph'] = wandb.Image(fig)
 wandb.log({'Graph': wandb.Image(fig)})
-fig = viz_heatmap(W_true, size=(5, 4), show=True)
+fig = viz_heatmap(W_true, size=(5, 4))
 wandb.log({'heatmap': wandb.Image(fig)})
 # wandb.run.summary['heatmap'] = wandb.Image(fig)
 #%%
@@ -158,10 +160,10 @@ for iteration in range(config["max_iter"]):
 W_est = W_est.detach().numpy().astype(float).round(2)
 W_est[np.abs(W_est) < config["w_threshold"]] = 0.
 
-fig = viz_graph(W_est, size=(7, 7), show=True)
+fig = viz_graph(W_est, size=(7, 7))
 # wandb.run.summary['Graph_est'] = wandb.Image(fig)
 wandb.log({'Graph_est': wandb.Image(fig)})
-fig = viz_heatmap(W_est, size=(5, 4), show=True)
+fig = viz_heatmap(W_est, size=(5, 4))
 # wandb.run.summary['heatmap_est'] = wandb.Image(fig)
 wandb.log({'heatmap_est': wandb.Image(fig)})
 
@@ -173,7 +175,7 @@ W_ = (W_true != 0).astype(float)
 W_est_ = (W_est != 0).astype(float)
 W_diff_ = np.abs(W_ - W_est_)
 
-fig = viz_graph(W_diff_, size=(7, 7), show=True)
+fig = viz_graph(W_diff_, size=(7, 7))
 # wandb.run.summary['Graph_diff'] = wandb.Image(fig)
 wandb.log({'Graph_diff': wandb.Image(fig)})
 #%%

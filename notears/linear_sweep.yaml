@@ -1,12 +1,11 @@
-program: nonlinear.py
+project: notears-linear-sweep
+program: linear.py
 method: grid
 metric:
   goal: minimize
   name: loss
 parameters:
   lr:
-    values: [0.1, 0.01, 0.001]
-  lambda1:
-    values: [0.1, 0.01, 0.001]
-  lambda2:
+    values: [0.01, 0.001]
+  lambda:
     values: [0.1, 0.01, 0.001]
