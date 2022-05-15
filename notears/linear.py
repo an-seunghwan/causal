@@ -24,10 +24,10 @@ from utils.viz import (
 from utils.trac_exp import trace_expm
 #%%
 config = {
-    "seed": 520,
-    "n": 500,
-    "d": 7,
-    "s0": 7,
+    "seed": 10,
+    "n": 5050,
+    "d": 5,
+    "s0": 8,
     "graph_type": 'ER',
     "sem_type": 'gauss',
     
