@@ -36,9 +36,9 @@ def get_args():
     parser.add_argument('--s0', default=8, type=int,
                         help='expected number of edges')
     parser.add_argument('--graph_type', type=str, default='ER',
-                        help='graph type')
+                        help='graph type: ER, SF, BP')
     parser.add_argument('--sem_type', type=str, default='gauss',
-                        help='sem type')
+                        help='sem type: gauss, exp, gumbel, uniform, logistic, poisson')
 
     parser.add_argument('--rho', default=1, type=float,
                         help='rho')
