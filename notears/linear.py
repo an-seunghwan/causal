@@ -33,7 +33,7 @@ def get_args():
                         help='the number of dataset')
     parser.add_argument('--d', default=5, type=int,
                         help='the number of nodes')
-    parser.add_argument('--s0', default=5, type=int,
+    parser.add_argument('--s0', default=8, type=int,
                         help='expected number of edges')
     parser.add_argument('--graph_type', type=str, default='ER',
                         help='graph type')
@@ -172,45 +172,56 @@ def main():
             optimizer.step()
             
             h_new = h_fun(W_est).item()
-            if h_new < config["progress_rate"] * h: 
+            # no change in weight estimation (convergence)
+            if abs(h_old - h_new) < 1e-8: 
                 break
-            elif abs(h_old - h_new) < 1e-8: # no change in weight estimation
-                if rho >= config["rho_max"]:
-                    break
-                else:
-                    rho *= config["rho_rate"]
             h_old = h_new
                 
             count += 1
-            if count % 10 == 0:
-                """update log"""
-                wandb.log(
-                    {
-                        # "inner_step": count,
-                        "inner_loop/h": h_new,
-                        "inner_loop/rho": rho,
-                        "inner_loop/loss": loss.item()
-                    }
-                )
-            
-        # update
-        h = h_new
+            """update log"""
+            wandb.log(
+                {
+                    # "inner_step": count,
+                    "inner_loop/h": h_new,
+                    "inner_loop/loss": loss.item()
+                }
+            )
+        
         # dual ascent step
-        alpha += rho * h
+        alpha += rho * h_new
+        
         # stopping rules
-        if h <= config["h_tol"] or rho >= config["rho_max"]: 
+        if h_new <= config["h_tol"]:
+            # update
+            h = h_new
+            """update log"""
+            wandb.log(
+                {
+                    # "iteration": iteration,
+                    "train/h": h,
+                    "train/rho": rho,
+                    "train/alpha": alpha,
+                    "train/loss": loss.item()
+                }
+            )
             break
-    
-        """update log"""
-        wandb.log(
-            {
-                # "iteration": iteration,
-                "train/h": h,
-                "train/rho": rho,
-                "train/alpha": alpha,
-                "train/loss": loss.item()
-            }
-        )
+        else:
+            """update log"""
+            wandb.log(
+                {
+                    # "iteration": iteration,
+                    "train/h": h_new,
+                    "train/rho": rho,
+                    "train/alpha": alpha,
+                    "train/loss": loss.item()
+                }
+            )
+            if h_new > config["progress_rate"] * h:
+                rho *= config["rho_rate"]
+                if rho >= config["rho_max"]:
+                    break
+            # update
+            h = h_new
         
         print('[iteration {:03d}]: loss: {:.4f}, h(W): {:.4f}, primal update: {:04d}'.format(
             iteration, loss.item(), h, count))
