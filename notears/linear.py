@@ -27,7 +27,7 @@ config = {
     "seed": 10,
     "n": 1000,
     "d": 5,
-    "s0": 8,
+    "s0": 5,
     "graph_type": 'ER',
     "sem_type": 'gauss',
     
@@ -65,6 +65,7 @@ wandb.init(
 )
 
 wandb.config = config
+wandb.run.summary['config'] = config
 #%%
 '''simulate DAG and weighted adjacency matrix'''
 set_random_seed(config["seed"])
@@ -179,7 +180,7 @@ fig = viz_heatmap(W_est, size=(5, 4))
 # wandb.run.summary['heatmap_est'] = wandb.Image(fig)
 wandb.log({'heatmap_est': wandb.Image(fig)})
 
-wandb.run.summary['IsDAG?'] = is_dag(W_est)
+wandb.run.summary['Is DAG?'] = is_dag(W_est)
 wandb.run.summary['W_est'] = wandb.Table(data=pd.DataFrame(W_est))
 wandb.run.summary['W_diff'] = wandb.Table(data=pd.DataFrame(W_true - W_est))
 
