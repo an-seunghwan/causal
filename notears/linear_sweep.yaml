@@ -5,9 +5,11 @@ metric:
   goal: minimize
   name: loss
 parameters:
-  # s0:
-  #   values: [5, 8, 10]
+  d:
+    values: [5, 8, 10]
+  s0:
+    values: [5, 8, 10]
   lambda:
-    values: [1, 0.1, 0.01]
+    values: [0.1, 0.01, 0.001]
   rho_rate:
     values: [2, 5, 10]
