@@ -3,10 +3,8 @@ program: linear.py
 method: grid
 metric:
   goal: minimize
-  name: loss
+  name: train/loss
 parameters:
-  d:
-    values: [5, 8, 10]
   s0:
     values: [5, 8, 10]
   lambda:

@@ -105,7 +105,7 @@ except:
 wandb.init(
     project="causal", 
     entity="anseunghwan",
-    tags=["notears", "linear", "torch"],
+    tags=["notears", "linear"],
     # name='notears'
 )
 #%%
