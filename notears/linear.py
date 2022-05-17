@@ -55,7 +55,7 @@ def get_args():
                         help='maximum iteration')
     parser.add_argument('--h_tol', default=1e-8, type=float,
                         help='h value tolerance')
-    parser.add_argument('--w_threshold', default=0.2, type=float,
+    parser.add_argument('--w_threshold', default=0.3, type=float,
                         help='weight adjacency matrix threshold')
     parser.add_argument('--lambda', default=0.01, type=float,
                         help='weight of LASSO regularization')
