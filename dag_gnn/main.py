@@ -10,7 +10,8 @@ import torch
 config = {
     'data_type': 'synthetic', # discrete, real
     "n": 5000,
-    "d": 10,
+    "d": 5,
+    "degree": 2,
     "graph_type": "ER",
     "sem_type": "gauss",
     
