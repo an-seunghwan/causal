@@ -12,8 +12,10 @@ config = {
     "n": 5000,
     "d": 5,
     "degree": 2,
+    "x_dim": 3,
     "graph_type": "ER",
     "sem_type": "gauss",
+    "nonlinear_type": "nonlinear_1",
     
     "lr": 0.001,
     "batch_size": 128,

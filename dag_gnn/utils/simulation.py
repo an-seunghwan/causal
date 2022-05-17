@@ -1,4 +1,8 @@
 #%%
+import torch
+from torch.utils.data.dataset import TensorDataset
+from torch.utils.data import DataLoader
+
 import numpy as np
 import random
 import igraph as ig
@@ -65,12 +69,12 @@ def simulate_dag(d: int,
         W += B_perm * (S == i) * U
     return W
 #%%
-def simulate_linear_sem(W: np.ndarray, 
-                        n: int, 
-                        x_dim: int,
-                        nonlinear_type: str = 'nonlinear_1',
-                        sem_type: str = 'gauss', 
-                        noise_scale=None):
+def simulate_sem(W: np.ndarray, 
+                n: int, 
+                x_dim: int,
+                nonlinear_type: str = 'nonlinear_1',
+                sem_type: str = 'gauss', 
+                noise_scale=None):
     """simulate samples from linear SEM with specified type of noise.
     Args:
         W (np.ndarray): d x d weighted adjacency matrix of DAG
@@ -140,6 +144,25 @@ def simulate_linear_sem(W: np.ndarray,
         X[:, [j], :] = _simulate_single_equation(X[:, parents], W[parents, j][..., None], scale_vec[j, :])
     return X
 #%%
+def load_data(config):
+    W = simulate_dag(
+        config["d"],
+        config["degree"],
+        config["graph_type"],
+    )
+    X = simulate_sem(
+        W,
+        config["n"],
+        config["x_dim"],
+        config["nonlinear_type"],
+        config["sem_type"]
+    )
+    
+    X = torch.FloatTensor(X)
+    data = TensorDataset(X, X)
+    data_loader = DataLoader(data, batch_size=config["batch_size"])
+    return data_loader, W
+#%%
 def main():
     n = 100
     d = 5
@@ -153,18 +176,18 @@ def main():
     print('graph_type passed!\n')
         
     for sem_type in ['gauss', 'exp', 'gumbel', 'uniform', 'logistic', 'poisson']:
-        X = simulate_linear_sem(W, n, x_dim, sem_type=sem_type)    
+        X = simulate_sem(W, n, x_dim, sem_type=sem_type)    
         assert X.shape == (n, d, x_dim)
     print('sem_type passed!\n')
     
     for nonlinear_type in ['nonlinear_1', 'nonlinear_2']:
-        X = simulate_linear_sem(W, n, x_dim, nonlinear_type=nonlinear_type)
+        X = simulate_sem(W, n, x_dim, nonlinear_type=nonlinear_type)
         assert X.shape == (n, d, x_dim)
     print('nonlinear_type passed!\n')
         
     noise_scale = np.ones((d, x_dim - 1))
     try:
-        X = simulate_linear_sem(W, n, x_dim, noise_scale=noise_scale)
+        X = simulate_sem(W, n, x_dim, noise_scale=noise_scale)
     except:
         print('noise_scale passed!\n')
 #%%
