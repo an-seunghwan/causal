@@ -25,7 +25,7 @@ def simulate_dag(d: int,
     Args:
         d (int): number of nodes
         degree (float): expected node degree (= in + out)
-        graph_type (str): ER, SF, BP
+        graph_type (str): ER, SF
         w_ranges (tuple): disjoint weight ranges
     Returns:
         W (np.ndarray): d x d weighted adjacency matrix of DAG
@@ -61,4 +61,81 @@ def simulate_dag(d: int,
         U = np.random.uniform(low=low, high=high, size=B.shape)
         W += B_perm * (S == i) * U
     return W
+#%%
+def simulate_linear_sem(W, n, sem_type, noise_scale=None, normalize=True):
+    """simulate samples from linear SEM with specified type of noise.
+    Args:
+        W (np.ndarray): d x d weighted adjacency matrix of DAG
+        n (int): number of samples, n = inf mimics population risk
+        sem_type (str): gauss, exp, gumbel, uniform, logistic, poisson
+        noise_scale (np.ndarray): scale parameter of addictive noise, default all ones
+        normalize (bool): If True, normalize simulated dataset
+
+    Returns:
+        X (np.ndarray): n x d sample matrix, 
+            if n == inf: d x d
+    """
+
+    def _simulate_single_equation(X, w, scale):
+        """
+        X: n x num of parents
+        w: num of parents x 1
+        x: n x 1
+        """
+        if sem_type == 'gauss':
+            z = np.random.normal(scale=scale, size=n)
+            x = X @ w + z
+        elif sem_type == 'exp':
+            z = np.random.exponential(scale=scale, size=n)
+            x = X @ w + z
+        elif sem_type == 'gumbel':
+            z = np.random.gumbel(scale=scale, size=n)
+            x = X @ w + z
+        elif sem_type == 'uniform':
+            z = np.random.uniform(low=-scale, high=scale, size=n)
+            x = X @ w + z
+        elif sem_type == 'logistic':
+            x = np.random.binomial(1, sigmoid(X @ w)) * 1.0
+        elif sem_type == 'poisson':
+            x = np.random.poisson(np.exp(X @ w)) * 1.0
+        else:
+            raise ValueError('unknown sem type')
+        return x
+    
+    d = W.shape[0]
+    
+    if noise_scale is None:
+        scale_vec = np.ones(d)
+    elif np.isscalar(noise_scale):
+        scale_vec = noise_scale * np.ones(d)
+    else:
+        if len(noise_scale) != d:
+            raise ValueError('noise scale must be a scalar or has length d')
+        scale_vec = noise_scale
+    
+    if not is_dag(W):
+        raise ValueError('W must be a DAG')
+    
+    '''?????'''
+    if np.isinf(n): # population risk for linear gauss SEM
+        if sem_type == 'gauss':
+            # make 1/d X @ X.T = true covariance matrix
+            X = np.sqrt(d) * np.diag(scale_vec) @ np.linalg.inv(np.eye(d) - W)
+            return X
+        else:
+            raise ValueError('population risk not available')
+    
+    # empirical risk
+    G = ig.Graph.Weighted_Adjacency(W.tolist())
+    ordered_vertices = G.topological_sorting()
+    assert len(ordered_vertices) == d
+    
+    X = np.zeros((n, d))
+    for j in ordered_vertices:
+        parents = G.neighbors(j, mode=ig.IN)
+        X[:, j] = _simulate_single_equation(X[:, parents], W[parents, j], scale_vec[j])
+    
+    if normalize:
+        X = X - np.mean(X, axis=0, keepdims=True) # normalize
+    return X
 #%%
