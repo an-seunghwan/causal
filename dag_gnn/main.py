@@ -78,6 +78,7 @@ wandb.init(
 )
 #%%
 set_random_seed(config["seed"])
+torch.manual_seed(config["seed"])
 train_loader, W_true = load_data(config)
 
 wandb.run.summary['W_true'] = wandb.Table(data=pd.DataFrame(W_true))
@@ -119,12 +120,13 @@ recon_loss = torch.pow(recon - train_batch, 2).sum() / train_batch.size(0)
 kl = torch.pow(logits, 2).sum()
 kl = 0.5 * kl / logits.size(0)
 
+# elbo
 elbo = recon_loss + kl
 
 L1_reg = config["lambda"] * torch.sum(torch.abs(adj_A_amplified))
+loss = elbo + L1_reg # sparsity loss
 
 h_A = h_fun(adj_A_amplified, config["d"])
-loss = elbo + L1_reg # sparsity loss
 loss += 0.5 * rho * (h_A ** 2)
 loss += alpha * h_A
 loss += 100. * torch.trace(adj_A_amplified * adj_A_amplified)
