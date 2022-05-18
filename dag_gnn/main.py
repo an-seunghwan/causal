@@ -1,4 +1,5 @@
 #%%
+import enum
 import os
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 #%%
@@ -16,6 +17,10 @@ from utils.simulation import (
 from utils.viz import (
     viz_graph,
     viz_heatmap,
+)
+
+from utils.utils import (
+    encode_onehot
 )
 #%%
 config = {
@@ -73,7 +78,17 @@ wandb.log({'Graph': wandb.Image(fig)})
 fig = viz_heatmap(W_true, size=(5, 4))
 wandb.log({'heatmap': wandb.Image(fig)})
 #%%
+"""Generate off-diagonal interaction graph"""
+off_diagonal = np.ones((config["d"], config["d"])) - np.eye(config["d"])
+rel_rec = torch.DoubleTensor(np.array(encode_onehot(np.where(off_diagonal)[1]), dtype=np.float64))
+rel_send = torch.DoubleTensor(np.array(encode_onehot(np.where(off_diagonal)[0]), dtype=np.float64))
 
+"""add adjacency matrix A"""
+adj_A = np.zeros((config["d"], config["d"]))
+#%%
+for batch_num, (train_batch, relations) in enumerate(train_loader):
+    if batch_num == 0: break
+train_batch.shape
 #%%
 wandb.run.finish()
 #%%
