@@ -1,6 +1,8 @@
 #%%
 import enum
 import os
+
+from notears.utils.simulation import count_accuracy
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 #%%
 import numpy as np
@@ -12,6 +14,7 @@ from utils.simulation import (
     set_random_seed,
     is_dag,
     load_data,
+    count_accuracy
 )
 
 from utils.viz import (
@@ -21,6 +24,11 @@ from utils.viz import (
 
 from utils.utils import (
     encode_onehot
+)
+
+from utils.model import (
+    Encoder,
+    Decoder
 )
 #%%
 config = {
@@ -78,17 +86,55 @@ wandb.log({'Graph': wandb.Image(fig)})
 fig = viz_heatmap(W_true, size=(5, 4))
 wandb.log({'heatmap': wandb.Image(fig)})
 #%%
-"""Generate off-diagonal interaction graph"""
-off_diagonal = np.ones((config["d"], config["d"])) - np.eye(config["d"])
-rel_rec = torch.DoubleTensor(np.array(encode_onehot(np.where(off_diagonal)[1]), dtype=np.float64))
-rel_send = torch.DoubleTensor(np.array(encode_onehot(np.where(off_diagonal)[0]), dtype=np.float64))
+# """Generate off-diagonal interaction graph"""
+# off_diagonal = np.ones((config["d"], config["d"])) - np.eye(config["d"])
+# rel_rec = torch.DoubleTensor(np.array(encode_onehot(np.where(off_diagonal)[1]), dtype=np.float64))
+# rel_send = torch.DoubleTensor(np.array(encode_onehot(np.where(off_diagonal)[0]), dtype=np.float64))
 
-"""add adjacency matrix A"""
+"""initialize adjacency matrix A"""
 adj_A = np.zeros((config["d"], config["d"]))
+#%%
+def h_fun(A, d):
+    x = torch.eye(d).float() + torch.div(A * A, d) # alpha = 1 / d
+    return torch.trace(torch.matrix_power(x, d)) - d
 #%%
 for batch_num, (train_batch, relations) in enumerate(train_loader):
     if batch_num == 0: break
 train_batch.shape
+#%%
+encoder = Encoder(config, adj_A, 32)
+decoder = Decoder(config, 32)
+#%%
+logits, h, adj_A_amplified = encoder(train_batch)
+recon, z = decoder(logits, adj_A_amplified, encoder.Wa)
+#%%
+rho = config["rho"]
+alpha = config["alpha"]
+h = config["h"]
+
+# reconstruction
+recon_loss = torch.pow(recon - train_batch, 2).sum() / train_batch.size(0)
+
+# KL-divergence
+kl = torch.pow(logits, 2).sum()
+kl = 0.5 * kl / logits.size(0)
+
+elbo = recon_loss + kl
+
+L1_reg = config["lambda"] * torch.sum(torch.abs(adj_A_amplified))
+
+h_A = h_fun(adj_A_amplified, config["d"])
+loss = elbo + L1_reg # sparsity loss
+loss += 0.5 * rho * (h_A ** 2)
+loss += alpha * h_A
+loss += 100. * torch.trace(adj_A_amplified * adj_A_amplified)
+#%%
+if torch.sum(adj_A_amplified != adj_A_amplified):
+    print('nan error\n')
+#%%
+# compute metrics
+W_est = adj_A_amplified.data.clone().numpy()
+acc = count_accuracy(W_true, W_est)
 #%%
 wandb.run.finish()
 #%%
