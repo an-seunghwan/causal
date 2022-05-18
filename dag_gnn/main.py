@@ -181,16 +181,32 @@ def train(rho, alpha, h, config):
         
         loss.backward()
         optimizer.step()
-
-        # compute metrics
+        
         W_est = adj_A_amplified.data.clone()
         h_new = h_fun(W_est, config["d"])
-        
-        acc = count_accuracy(W_true, W_est)
+        if h_new.item() > config["progress_rate"] * h_old:
+            rho *= config["rho_rate"]
+        else:
+            break
+
+        # W_est = adj_A_amplified.data.clone().numpy()
+        # W_est[np.abs(W_est) < config["w_threshold"]] = 0.
+        # B_est = (W_est != 0).astype(float)
+        # B_true = (W_true != 0).astype(float)
+
+        # # compute metrics
+        # acc = count_accuracy(B_true, B_est)
+        # wandb.log(acc)
 #%%
 rho = config["rho"]
 alpha = config["alpha"]
 h = config["h"]
+
+h_old = h_new.item()
+alpha += config["rho"] * h_new.item()
+
+if h_new.item() <= config["h_tol"]:
+    break
 #%%
 wandb.run.finish()
 #%%
