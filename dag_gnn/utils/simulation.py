@@ -159,7 +159,7 @@ def load_data(config):
     )
     
     X = torch.FloatTensor(X)
-    data = TensorDataset(X, X)
+    data = TensorDataset(X)
     data_loader = DataLoader(data, batch_size=config["batch_size"])
     return data_loader, W
 #%%
