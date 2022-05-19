@@ -55,7 +55,7 @@ config = {
     "lambda": 0.001,
     "progress_rate": 0.25,
     "rho_max": 1e+20, 
-    "rho_rate": 10.,
+    "rho_rate": 2.,
     
     "fig_show": True,
 }
