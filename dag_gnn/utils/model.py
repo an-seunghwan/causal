@@ -20,8 +20,8 @@ class Encoder(nn.Module):
         self.fc1 = nn.Linear(config["x_dim"], hidden_dim, bias=True)
         self.fc2 = nn.Linear(hidden_dim, config["x_dim"], bias=True)
         self.Wa = nn.Parameter(torch.zeros(config["x_dim"]), requires_grad=True)
-        self.z = nn.Parameter(torch.tensor(tol))
-        self.z_positive = nn.Parameter(torch.ones_like(torch.from_numpy(adj_A)).float())
+        # self.z = nn.Parameter(torch.tensor(tol))
+        # self.z_positive = nn.Parameter(torch.ones_like(torch.from_numpy(adj_A)).float())
         self.init_weights()
     
     def init_weights(self):
@@ -76,10 +76,10 @@ class Decoder(nn.Module):
         
     def forward(self, input, adj_A_amplified, Wa):
         adj_A_inverse_normalized = self.inverse_normalize_adjacency_matrix(adj_A_amplified)
-        z = torch.matmul(adj_A_inverse_normalized, input + Wa) - Wa
-        recon = F.relu(self.fc1(z))
+        h = torch.matmul(adj_A_inverse_normalized, input + Wa) - Wa
+        recon = F.relu(self.fc1(h))
         recon = self.fc2(recon)
-        return recon, z
+        return recon, h
 #%%
 def main():
     config = {
