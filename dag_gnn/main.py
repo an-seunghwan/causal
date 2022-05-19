@@ -5,6 +5,7 @@ os.chdir(os.path.dirname(os.path.abspath(__file__)))
 import numpy as np
 import pandas as pd
 import math
+import tqdm
 
 import torch
 
@@ -26,7 +27,7 @@ from utils.model import (
 )
 #%%
 config = {
-    "seed": 1,
+    "seed": 10,
     'data_type': 'synthetic', # discrete, real
     "n": 5000,
     "d": 7,
@@ -197,18 +198,20 @@ def train(rho, alpha, h, config, optimizer):
         """accumulate losses"""
         for x, y in loss_:
             logs[x] = logs.get(x) + [y.item()]
-        return logs, adj_A_amplified
+            
+    return logs, adj_A_amplified
 #%%
 rho = config["rho"]
 alpha = config["alpha"]
 h = config["h"]
     
 for iteration in range(config["max_iter"]):
+    
+    """primal problem"""
     while rho < config["rho_max"]:
-        
-        """primal problem"""
-        for epoch in range(config["epochs"]):
-            logs, adj_A_amplified = train(rho, alpha, h, config, optimizer)
+        # find argmin of primal problem (local solution) = update for config["epochs"] times
+        # for epoch in tqdm.tqdm(range(config["epochs"]), desc="primal update"):
+        logs, adj_A_amplified = train(rho, alpha, h, config, optimizer)
         
         W_est = adj_A_amplified.data.clone()
         h_new = h_fun(W_est, config["d"])
@@ -226,8 +229,9 @@ for iteration in range(config["max_iter"]):
     print_input += ', h(W): {:.8f}'.format(h)
     print(print_input)
     
-    wandb.log(logs)
-    wandb.log({'h(W)': h})
+    """update log"""
+    wandb.log({x : np.mean(y) for x, y in logs.items()})
+    wandb.log({'h(W)' : h})
     
     """stopping rule"""
     if h_new.item() <= config["h_tol"]:
