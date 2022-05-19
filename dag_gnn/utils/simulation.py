@@ -163,37 +163,6 @@ def load_data(config):
     data_loader = DataLoader(data, batch_size=config["batch_size"])
     return data_loader, W
 #%%
-def main():
-    n = 100
-    d = 5
-    degree = 4
-    x_dim = 3
-    
-    for graph_type in ['ER', 'SF']:
-        W = simulate_dag(d, degree, graph_type)
-        assert is_dag(W)
-        assert W.shape == (d, d)
-    print('graph_type passed!\n')
-        
-    for sem_type in ['gauss', 'exp', 'gumbel', 'uniform', 'logistic', 'poisson']:
-        X = simulate_sem(W, n, x_dim, sem_type=sem_type)    
-        assert X.shape == (n, d, x_dim)
-    print('sem_type passed!\n')
-    
-    for nonlinear_type in ['nonlinear_1', 'nonlinear_2']:
-        X = simulate_sem(W, n, x_dim, nonlinear_type=nonlinear_type)
-        assert X.shape == (n, d, x_dim)
-    print('nonlinear_type passed!\n')
-        
-    noise_scale = np.ones((d, x_dim - 1))
-    try:
-        X = simulate_sem(W, n, x_dim, noise_scale=noise_scale)
-    except:
-        print('noise_scale passed!\n')
-#%%
-if __name__ == '__main__':
-    main()
-#%%
 def count_accuracy(B_true, B_est):
     """Compute various accuracy metrics for B_est.
     reverse = predicted association exists in condition in opposite direction
@@ -240,4 +209,35 @@ def count_accuracy(B_true, B_est):
     SHD = len(extra_lower) + len(missing_lower) + len(reverse)
 
     return {'FDR': FDR, 'SHD': SHD, 'nonzero': len(pred)}
+#%%
+def main():
+    n = 100
+    d = 5
+    degree = 4
+    x_dim = 3
+    
+    for graph_type in ['ER', 'SF']:
+        W = simulate_dag(d, degree, graph_type)
+        assert is_dag(W)
+        assert W.shape == (d, d)
+    print('graph_type passed!\n')
+        
+    for sem_type in ['gauss', 'exp', 'gumbel', 'uniform', 'logistic', 'poisson']:
+        X = simulate_sem(W, n, x_dim, sem_type=sem_type)    
+        assert X.shape == (n, d, x_dim)
+    print('sem_type passed!\n')
+    
+    for nonlinear_type in ['nonlinear_1', 'nonlinear_2']:
+        X = simulate_sem(W, n, x_dim, nonlinear_type=nonlinear_type)
+        assert X.shape == (n, d, x_dim)
+    print('nonlinear_type passed!\n')
+        
+    noise_scale = np.ones((d, x_dim - 1))
+    try:
+        X = simulate_sem(W, n, x_dim, noise_scale=noise_scale)
+    except:
+        print('noise_scale passed!\n')
+#%%
+if __name__ == '__main__':
+    main()
 #%%
