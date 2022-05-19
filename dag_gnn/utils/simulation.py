@@ -82,35 +82,36 @@ def simulate_sem(W: np.ndarray,
         x_dim (int): dimension of each node variable
         sem_type (str): gauss, exp, gumbel, uniform, logistic, poisson
         nonlinear_type (str): nonlinear_1, nonlinear_2
-        noise_scale (np.ndarray): scale parameter of addictive noise, default all ones
+        noise_scale (float): scale parameter of addictive noise, default one
     Returns:
         X (np.ndarray): n x d sample matrix, 
     """
 
     def _simulate_single_equation(x, w, scale):
         """
-        x: [n, num of parents, x_dim]
-        w: [num of parents, 1]
+        x: [n, num of parents]
+        w: [num of parents, ]
         h: n x 1
         """
+        
         if nonlinear_type == 'nonlinear_1':
-            h = w.T @ np.cos(x + 1)
+            h = np.cos(x + 1).dot(w)
         elif nonlinear_type == 'nonlinear_2':
-            h = 2. * np.sin(w.T @ (x + 0.5)) + w.T @ (x + 0.5)
+            h = 2. * np.sin((x + 0.5).dot(w)) + (x + 0.5).dot(w)
         else:
             raise ValueError('unknown nonlinear type')
         
         if sem_type == 'gauss':
-            z = scale * np.random.normal(size=(n, 1, x_dim))
+            z = scale * np.random.normal(size=n)
             h += z
         elif sem_type == 'exp':
-            z = np.concatenate([np.random.exponential(scale=s, size=(n, 1, 1)) for s in scale], axis=-1)
+            z = np.random.exponential(scale=scale, size=n)
             h += z
         elif sem_type == 'gumbel':
-            z = np.concatenate([np.random.gumbel(scale=s, size=(n, 1, 1)) for s in scale], axis=-1)
+            z = np.random.gumbel(scale=scale, size=n)
             h += z
         elif sem_type == 'uniform':
-            z = np.concatenate([np.random.uniform(low=-s, high=s, size=(n, 1, 1)) for s in scale], axis=-1)
+            z = np.random.uniform(low=-scale, high=scale, size=n)
             h += z
         elif sem_type == 'logistic':
             h = np.random.binomial(1, sigmoid(h)) * 1.0
@@ -122,14 +123,13 @@ def simulate_sem(W: np.ndarray,
     
     d = W.shape[0]
     
+    # all node (variable) and dimensions share the same noise scale
     if noise_scale is None:
-        scale_vec = np.ones((d, x_dim))
-    elif np.isscalar(noise_scale):
-        scale_vec = noise_scale * np.ones((d, x_dim))
+        scale = 1.
     else:
-        if noise_scale.shape != (d, x_dim):
-            raise ValueError('noise scale shape must be (d, x_dim)')
-        scale_vec = noise_scale
+        if not np.isscalar(noise_scale):
+            raise ValueError('noise scale must be scalar!')
+        scale = noise_scale
     
     if not is_dag(W):
         raise ValueError('W must be a DAG')
@@ -138,10 +138,21 @@ def simulate_sem(W: np.ndarray,
     ordered_vertices = G.topological_sorting()
     assert len(ordered_vertices) == d
     
+    # first dimension for all node (variable)
     X = np.zeros((n, d, x_dim))
     for j in ordered_vertices:
         parents = G.neighbors(j, mode=ig.IN)
-        X[:, [j], :] = _simulate_single_equation(X[:, parents], W[parents, j][..., None], scale_vec[j, :])
+        X[:, j, 0] = _simulate_single_equation(X[:, parents, 0], W[parents, j], scale)
+    
+    # other dimenions
+    if x_dim > 1:
+        for i in range(1, x_dim):
+            X[:, :, i] = np.random.normal(scale=scale, size=1) * X[:, :, 0]
+            X[:, :, i] += np.random.normal(scale=scale, size=1)
+            X[:, :, i] += np.random.normal(scale=scale, size=(n, d))
+    X[:, :, 0] = np.random.normal(scale=scale, size=1) * X[:, :, 0]
+    X[:, :, 0] += np.random.normal(scale=scale, size=1)
+    X[:, :, 0] += np.random.normal(scale=scale, size=(n, d))
     return X
 #%%
 def load_data(config):
@@ -215,6 +226,9 @@ def main():
     d = 5
     degree = 4
     x_dim = 3
+    # graph_type = "ER"
+    # sem_type = "gauss"
+    # nonlinear_type = "nonlinear_2"
     
     for graph_type in ['ER', 'SF']:
         W = simulate_dag(d, degree, graph_type)
@@ -240,4 +254,80 @@ def main():
 #%%
 if __name__ == '__main__':
     main()
+#%%
+"""FIXME"""
+# def simulate_sem(W: np.ndarray, 
+#                 n: int, 
+#                 x_dim: int,
+#                 nonlinear_type: str = 'nonlinear_1',
+#                 sem_type: str = 'gauss', 
+#                 noise_scale=None):
+#     """simulate samples from linear SEM with specified type of noise.
+#     Args:
+#         W (np.ndarray): d x d weighted adjacency matrix of DAG
+#         n (int): number of samples
+#         x_dim (int): dimension of each node variable
+#         sem_type (str): gauss, exp, gumbel, uniform, logistic, poisson
+#         nonlinear_type (str): nonlinear_1, nonlinear_2
+#         noise_scale (np.ndarray): scale parameter of addictive noise, default all ones
+#     Returns:
+#         X (np.ndarray): n x d sample matrix, 
+#     """
+
+#     def _simulate_single_equation(x, w, scale):
+#         """
+#         x: [n, num of parents, x_dim]
+#         w: [num of parents, 1]
+#         h: n x 1
+#         """
+#         if nonlinear_type == 'nonlinear_1':
+#             h = w.T @ np.cos(x + 1)
+#         elif nonlinear_type == 'nonlinear_2':
+#             h = 2. * np.sin(w.T @ (x + 0.5)) + w.T @ (x + 0.5)
+#         else:
+#             raise ValueError('unknown nonlinear type')
+        
+#         if sem_type == 'gauss':
+#             z = scale * np.random.normal(size=(n, 1, x_dim))
+#             h += z
+#         elif sem_type == 'exp':
+#             z = np.concatenate([np.random.exponential(scale=s, size=(n, 1, 1)) for s in scale], axis=-1)
+#             h += z
+#         elif sem_type == 'gumbel':
+#             z = np.concatenate([np.random.gumbel(scale=s, size=(n, 1, 1)) for s in scale], axis=-1)
+#             h += z
+#         elif sem_type == 'uniform':
+#             z = np.concatenate([np.random.uniform(low=-s, high=s, size=(n, 1, 1)) for s in scale], axis=-1)
+#             h += z
+#         elif sem_type == 'logistic':
+#             h = np.random.binomial(1, sigmoid(h)) * 1.0
+#         elif sem_type == 'poisson':
+#             h = np.random.poisson(np.exp(h)) * 1.0
+#         else:
+#             raise ValueError('unknown sem type')
+#         return h
+    
+#     d = W.shape[0]
+    
+#     if noise_scale is None:
+#         scale_vec = np.ones((d, x_dim))
+#     elif np.isscalar(noise_scale):
+#         scale_vec = noise_scale * np.ones((d, x_dim))
+#     else:
+#         if noise_scale.shape != (d, x_dim):
+#             raise ValueError('noise scale shape must be (d, x_dim)')
+#         scale_vec = noise_scale
+    
+#     if not is_dag(W):
+#         raise ValueError('W must be a DAG')
+    
+#     G = ig.Graph.Weighted_Adjacency(W.tolist())
+#     ordered_vertices = G.topological_sorting()
+#     assert len(ordered_vertices) == d
+    
+#     X = np.zeros((n, d, x_dim))
+#     for j in ordered_vertices:
+#         parents = G.neighbors(j, mode=ig.IN)
+#         X[:, [j], :] = _simulate_single_equation(X[:, parents], W[parents, j][..., None], scale_vec[j, :])
+#     return X
 #%%
