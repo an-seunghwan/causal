@@ -57,7 +57,7 @@ config = {
     "rho_max": 1e+20, 
     "rho_rate": 1.5,
     
-    "fig_show": True,
+    "fig_show": False,
 }
 #%%
 import sys
