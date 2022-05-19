@@ -34,6 +34,9 @@ class Encoder(nn.Module):
     
     def normalize_adjacency_matrix(self, adj):
         return torch.eye(adj.shape[0]).float() - adj.transpose(0, 1)
+    
+    def amplified_adjacency_matrix(self):
+        return torch.sinh(3. * self.adj_A)
         
     def forward(self, input):
         if torch.sum(self.adj_A != self.adj_A):

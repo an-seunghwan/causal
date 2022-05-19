@@ -20,10 +20,6 @@ from utils.viz import (
     viz_heatmap,
 )
 
-from utils.utils import (
-    encode_onehot
-)
-
 from utils.model import (
     Encoder,
     Decoder
@@ -33,33 +29,34 @@ config = {
     "seed": 1,
     'data_type': 'synthetic', # discrete, real
     "n": 5000,
-    "d": 5,
+    "d": 7,
     "degree": 3,
     "x_dim": 3,
     "graph_type": "ER",
     "sem_type": "gauss",
-    "nonlinear_type": "nonlinear_1",
-    
-    "hidden": 32,
+    "nonlinear_type": "nonlinear_2",
+    "hidden": 64,
     
     "epochs": 300,
     "lr": 0.001,
     "lr_decay": 200,
     "gamma": 1.,
-    "batch_size": 128,
+    "batch_size": 100,
     
     "rho": 1, # initial value
     "alpha": 0., # initial value
     "h": np.inf, # initial value
     
-    "loss_type": 'l2',
     "max_iter": 100, 
+    "loss_type": 'l2',
     "h_tol": 1e-8, 
     "w_threshold": 0.3,
-    "lambda": 0.005,
+    "lambda": 0.001,
     "progress_rate": 0.25,
-    "rho_max": 1e+16, 
+    "rho_max": 1e+20, 
     "rho_rate": 2.,
+    
+    "fig_show": True,
 }
 #%%
 import sys
@@ -74,10 +71,9 @@ except:
     import wandb
 
 wandb.init(
-    project="causal", 
+    project="(causal)DAG-GNN", 
     entity="anseunghwan",
-    tags=["DAG-GNN", "nonlinear"],
-    # name='notears'
+    tags=["nonlinear"],
 )
 #%%
 config["cuda"] = torch.cuda.is_available()
@@ -89,9 +85,9 @@ if config["cuda"]:
 train_loader, W_true = load_data(config)
 
 wandb.run.summary['W_true'] = wandb.Table(data=pd.DataFrame(W_true))
-fig = viz_graph(W_true, size=(7, 7), show=True)
+fig = viz_graph(W_true, size=(7, 7), show=config["fig_show"])
 wandb.log({'Graph': wandb.Image(fig)})
-fig = viz_heatmap(W_true, size=(5, 4))
+fig = viz_heatmap(W_true, size=(5, 4), show=config["fig_show"])
 wandb.log({'heatmap': wandb.Image(fig)})
 #%%
 # """Generate off-diagonal interaction graph"""
@@ -140,12 +136,20 @@ def update_optimizer(optimizer, lr, rho):
         param_group["lr"] = lr
     return optimizer, lr
 #%%
-def train(rho, alpha, h, config):
+def train(rho, alpha, h, config, optimizer):
     encoder.train()
     decoder.train()
     
     # update optimizer
     optimizer, lr = update_optimizer(optimizer, config["lr"], rho)
+    
+    logs = {
+        'loss': [], 
+        'recon': [],
+        'kl': [],
+        'L1': [],
+        'aug': [],
+    }
     
     for batch_num, [train_batch] in enumerate(train_loader):
         if config["cuda"]:
@@ -161,52 +165,103 @@ def train(rho, alpha, h, config):
         if torch.sum(recon != recon):
             print('nan error\n')
             
+        loss_ = []    
+        
         # reconstruction
-        recon_loss = torch.pow(recon - train_batch, 2).sum() / train_batch.size(0)
+        recon = torch.pow(recon - train_batch, 2).sum() / train_batch.size(0)
+        loss_.append(('recon', recon))
 
         # KL-divergence
         kl = torch.pow(logits, 2).sum()
         kl = 0.5 * kl / logits.size(0)
+        loss_.append(('kl', kl))
 
-        # elbo
-        elbo = recon_loss + kl
+        # sparsity loss
+        L1 = config["lambda"] * torch.sum(torch.abs(adj_A_amplified))
+        loss_.append(('L1', L1))
 
-        L1_reg = config["lambda"] * torch.sum(torch.abs(adj_A_amplified))
-        loss = elbo + L1_reg # sparsity loss
-
+        # augmentation and lagrangian loss
         h_A = h_fun(adj_A_amplified, config["d"])
-        loss += 0.5 * rho * (h_A ** 2)
-        loss += alpha * h_A
-        loss += 100. * torch.trace(adj_A_amplified * adj_A_amplified)
+        aug = 0.5 * rho * (h_A ** 2)
+        aug += alpha * h_A
+        """?????"""
+        aug += 100. * torch.trace(adj_A_amplified * adj_A_amplified)
+        loss_.append(('aug', aug))
+        
+        loss = sum([y for _, y in loss_])
+        loss_.append(('loss', loss))
         
         loss.backward()
         optimizer.step()
         
-        W_est = adj_A_amplified.data.clone()
-        h_new = h_fun(W_est, config["d"])
-        if h_new.item() > config["progress_rate"] * h_old:
-            rho *= config["rho_rate"]
-        else:
-            break
-
-        # W_est = adj_A_amplified.data.clone().numpy()
-        # W_est[np.abs(W_est) < config["w_threshold"]] = 0.
-        # B_est = (W_est != 0).astype(float)
-        # B_true = (W_true != 0).astype(float)
-
-        # # compute metrics
-        # acc = count_accuracy(B_true, B_est)
-        # wandb.log(acc)
+        """accumulate losses"""
+        for x, y in loss_:
+            logs[x] = logs.get(x) + [y.item()]
+        return logs, adj_A_amplified
 #%%
 rho = config["rho"]
 alpha = config["alpha"]
 h = config["h"]
-
-h_old = h_new.item()
-alpha += config["rho"] * h_new.item()
-
-if h_new.item() <= config["h_tol"]:
-    break
+    
+for iteration in range(config["max_iter"]):
+    while rho < config["rho_max"]:
+        
+        """primal problem"""
+        for epoch in range(config["epochs"]):
+            logs, adj_A_amplified = train(rho, alpha, h, config, optimizer)
+        
+        W_est = adj_A_amplified.data.clone()
+        h_new = h_fun(W_est, config["d"])
+        if h_new.item() > config["progress_rate"] * h:
+            rho *= config["rho_rate"]
+        else:
+            break
+    
+    """dual ascent"""
+    h = h_new.item()
+    alpha += config["rho"] * h_new.item()
+    
+    print_input = "[iteration {:03d}]".format(iteration)
+    print_input += ''.join([', {}: {:.4f}'.format(x, np.mean(y).round(2)) for x, y in logs.items()])
+    print_input += ', h(W): {:.8f}'.format(h)
+    print(print_input)
+    
+    wandb.log(logs)
+    wandb.log({'h(W)': h})
+    
+    """stopping rule"""
+    if h_new.item() <= config["h_tol"]:
+        break
 #%%
+"""final metrics"""
+adj_A_amplified = encoder.amplified_adjacency_matrix()
+W_est = adj_A_amplified.data.clone().numpy()
+W_est[np.abs(W_est) < config["w_threshold"]] = 0.
+W_est = W_est.astype(float).round(2)
+
+fig = viz_graph(W_est, size=(7, 7), show=config["fig_show"])
+wandb.log({'Graph_est': wandb.Image(fig)})
+fig = viz_heatmap(W_est, size=(5, 4), show=config["fig_show"])
+wandb.log({'heatmap_est': wandb.Image(fig)})
+
+wandb.run.summary['Is DAG?'] = is_dag(W_est)
+wandb.run.summary['W_est'] = wandb.Table(data=pd.DataFrame(W_est))
+wandb.run.summary['W_diff'] = wandb.Table(data=pd.DataFrame(W_true - W_est))
+
+W_ = (W_true != 0).astype(float)
+W_est_ = (W_est != 0).astype(float)
+W_diff_ = np.abs(W_ - W_est_)
+
+fig = viz_graph(W_diff_, size=(7, 7))
+wandb.log({'Graph_diff': wandb.Image(fig)})
+
+B_est = (W_est != 0).astype(float)
+B_true = (W_true != 0).astype(float)
+
+# compute metrics
+acc = count_accuracy(B_true, B_est)
+wandb.log(acc)
+#%%
+wandb.config.update(config)
 wandb.run.finish()
 #%%
