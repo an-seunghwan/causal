@@ -55,7 +55,7 @@ config = {
     "lambda": 0.001,
     "progress_rate": 0.25,
     "rho_max": 1e+20, 
-    "rho_rate": 2.,
+    "rho_rate": 10.,
     
     "fig_show": True,
 }
@@ -210,7 +210,8 @@ for iteration in range(config["max_iter"]):
     """primal problem"""
     while rho < config["rho_max"]:
         # find argmin of primal problem (local solution) = update for config["epochs"] times
-        # for epoch in tqdm.tqdm(range(config["epochs"]), desc="primal update"):
+        # for epoch in tqdm.tqdm(range(config["epochs"]), desc="primal update"): -> BAD...
+        # only one epoch is fine for finding argmin
         logs, adj_A_amplified = train(rho, alpha, h, config, optimizer)
         
         W_est = adj_A_amplified.data.clone()
