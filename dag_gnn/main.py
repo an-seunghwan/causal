@@ -27,19 +27,19 @@ from utils.model import (
 )
 #%%
 config = {
-    "seed": 10,
+    "seed": 42,
     'data_type': 'synthetic', # discrete, real
     "n": 5000,
-    "d": 7,
-    "degree": 3,
-    "x_dim": 3,
+    "d": 10,
+    "degree": 2,
+    "x_dim": 1,
     "graph_type": "ER",
     "sem_type": "gauss",
     "nonlinear_type": "nonlinear_2",
     "hidden": 64,
     
     "epochs": 300,
-    "lr": 0.002,
+    "lr": 0.003,
     "lr_decay": 200,
     "gamma": 1.,
     "batch_size": 100,
@@ -52,12 +52,12 @@ config = {
     "loss_type": 'l2',
     "h_tol": 1e-8, 
     "w_threshold": 0.3,
-    "lambda": 0.001,
+    "lambda": 1e-8,
     "progress_rate": 0.25,
     "rho_max": 1e+20, 
-    "rho_rate": 1.5,
+    "rho_rate": 10,
     
-    "fig_show": False,
+    "fig_show": True,
 }
 #%%
 import sys
@@ -210,10 +210,10 @@ for iteration in range(config["max_iter"]):
     """primal problem"""
     while rho < config["rho_max"]:
         # find argmin of primal problem (local solution) = update for config["epochs"] times
-        # for epoch in tqdm.tqdm(range(config["epochs"]), desc="primal update"):
-        #     logs, adj_A_amplified = train(rho, alpha, h, config, optimizer)
+        for epoch in tqdm.tqdm(range(config["epochs"]), desc="primal update"):
+            logs, adj_A_amplified = train(rho, alpha, h, config, optimizer)
         # only one epoch is fine for finding argmin
-        logs, adj_A_amplified = train(rho, alpha, h, config, optimizer)
+        # logs, adj_A_amplified = train(rho, alpha, h, config, optimizer)
         
         W_est = adj_A_amplified.data.clone()
         h_new = h_fun(W_est, config["d"])

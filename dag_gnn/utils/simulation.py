@@ -69,6 +69,7 @@ def simulate_dag(d: int,
         W += B_perm * (S == i) * U
     return W.round(2)
 #%%
+#%%
 def simulate_sem(W: np.ndarray, 
                 n: int, 
                 x_dim: int,
