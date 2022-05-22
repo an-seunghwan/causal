@@ -1,5 +1,4 @@
 #%%
-import torch
 import numpy as np
 import random
 import igraph as ig
@@ -97,7 +96,7 @@ def simulate_linear_sem(W, n, sem_type, noise_scale=None, normalize=True):
         X (np.ndarray): n x d sample matrix, 
             if n == inf: d x d
     """
-
+    
     def _simulate_single_equation(X, w, scale):
         """
         X: n x num of parents
@@ -124,6 +123,30 @@ def simulate_linear_sem(W, n, sem_type, noise_scale=None, normalize=True):
             raise ValueError('unknown sem type')
         return x
     
+        # if sem_type == 'gauss':
+        #     s = (1. - std_mix) * scale + std_mix * np.abs(np.sum(X, axis=1))
+        #     z = np.random.normal(scale=s, size=n)
+        #     x = X @ w + z
+        # elif sem_type == 'exp':
+        #     s = (1. - std_mix) * scale + std_mix * np.abs(np.sum(X, axis=1))
+        #     z = np.random.exponential(scale=s, size=n)
+        #     x = X @ w + z
+        # elif sem_type == 'gumbel':
+        #     s = (1. - std_mix) * scale + std_mix * np.abs(np.sum(X, axis=1))
+        #     z = np.random.gumbel(scale=s, size=n)
+        #     x = X @ w + z
+        # elif sem_type == 'uniform':
+        #     s = (1. - std_mix) * scale + std_mix * np.abs(np.sum(X, axis=1))
+        #     z = np.random.uniform(low=-s, high=s, size=n)
+        #     x = X @ w + z
+        # elif sem_type == 'logistic':
+        #     x = np.random.binomial(1, sigmoid(X @ w)) * 1.0
+        # elif sem_type == 'poisson':
+        #     x = np.random.poisson(np.exp(X @ w)) * 1.0
+        # else:
+        #     raise ValueError('unknown sem type')
+        # return x
+    
     d = W.shape[0]
     
     if noise_scale is None:
@@ -137,15 +160,6 @@ def simulate_linear_sem(W, n, sem_type, noise_scale=None, normalize=True):
     
     if not is_dag(W):
         raise ValueError('W must be a DAG')
-    
-    '''?????'''
-    if np.isinf(n): # population risk for linear gauss SEM
-        if sem_type == 'gauss':
-            # make 1/d X @ X.T = true covariance matrix
-            X = np.sqrt(d) * np.diag(scale_vec) @ np.linalg.inv(np.eye(d) - W)
-            return X
-        else:
-            raise ValueError('population risk not available')
     
     # empirical risk
     G = ig.Graph.Weighted_Adjacency(W.tolist())

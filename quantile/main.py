@@ -24,13 +24,31 @@ from utils.viz import (
 
 from utils.trac_exp import trace_expm
 #%%
+import sys
+import subprocess
+try:
+    import wandb
+except:
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "wandb"])
+    with open("../wandb_api.txt", "r") as f:
+        key = f.readlines()
+    subprocess.run(["wandb", "login"], input=key[0], encoding='utf-8')
+    import wandb
+
+wandb.init(
+    project="(causal)quantile", 
+    entity="anseunghwan",
+    tags=["proposal"],
+    # name='notears'
+)
+#%%
 import argparse
 def get_args(debug=False):
     parser = argparse.ArgumentParser('parameters')
 
     parser.add_argument('--seed', type=int, default=10, 
                         help='seed for repeatable results')
-    parser.add_argument('--n', default=1000, type=int,
+    parser.add_argument('--n', default=500, type=int,
                         help='the number of dataset')
     parser.add_argument('--d', default=5, type=int,
                         help='the number of nodes')
@@ -62,10 +80,10 @@ def get_args(debug=False):
                         help='progress rate')
     parser.add_argument('--rho_max', default=1e+16, type=float,
                         help='rho max')
-    parser.add_argument('--rho_rate', default=2, type=float,
+    parser.add_argument('--rho_rate', default=10, type=float,
                         help='rho rate')
     
-    parser.add_argument('--show_fig', default=True, type=bool)
+    parser.add_argument('--show_fig', default=False, type=bool)
 
     if debug:
         return parser.parse_args(args=[])
@@ -95,24 +113,6 @@ def get_args(debug=False):
 #     "rho_rate": 2.,
 # }
 #%%
-import sys
-import subprocess
-try:
-    import wandb
-except:
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "wandb"])
-    with open("../wandb_api.txt", "r") as f:
-        key = f.readlines()
-    subprocess.run(["wandb", "login"], input=key[0], encoding='utf-8')
-    import wandb
-
-wandb.init(
-    project="(causal)quantile", 
-    entity="anseunghwan",
-    tags=["proposal"],
-    # name='notears'
-)
-#%%
 def h_fun(W):
     """Evaluate DAGness constraint"""
     h = trace_expm(W * W) - W.shape[0]
@@ -133,7 +133,7 @@ def loss_function(X, W_est, alpha, rho, config, quantiles):
     return loss
 #%%
 def main():
-    config = vars(get_args(debug=True)) # default configuration
+    config = vars(get_args(debug=False)) # default configuration
     wandb.config.update(config)
 
     """simulate DAG and weighted adjacency matrix"""
@@ -148,7 +148,7 @@ def main():
     wandb.log({'heatmap': wandb.Image(fig)})
 
     """simulate dataset"""
-    X = simulate_linear_sem(W_true, config["n"], config["sem_type"], noise_scale=2, normalize=True)
+    X = simulate_linear_sem(W_true, config["n"], config["sem_type"], normalize=True)
     n, d = X.shape
     assert n == config["n"]
     assert d == config["d"]
