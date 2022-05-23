@@ -4,7 +4,6 @@ os.chdir(os.path.dirname(os.path.abspath(__file__)))
 #%%
 import numpy as np
 import pandas as pd
-import math
 import tqdm
 
 import torch
@@ -43,14 +42,14 @@ wandb.init(
 )
 #%%
 config = {
-    "seed": 42,
+    "seed": 1230,
     'data_type': 'synthetic', # discrete, real
     "n": 3000,
     "d": 20,
     "degree": 3,
     "graph_type": "ER",
     "sem_type": "gauss",
-    "nonlinear_type": "nonlinear_2",
+    "nonlinear_type": "nonlinear_1",
     "hidden_dim": 16,
     "num_layer": 2,
     "x_dim": 1,
@@ -58,9 +57,6 @@ config = {
     
     "epochs": 300,
     "lr": 0.001,
-    "lr_decay": 200,
-    "gamma": 1.,
-    "batch_size": 100,
     "init_iter": 5,
     "early_stopping": True,
     "early_stopping_threshold": 1.15,
@@ -71,7 +67,7 @@ config = {
     
     "max_iter": 20, 
     "loss_type": 'l2',
-    "h_tol": 1e-8, 
+    "h_tol": 1e-12, 
     "w_threshold": 0.2,
     "lambda": 1.,
     "progress_rate": 0.25,
@@ -87,7 +83,7 @@ set_random_seed(config["seed"])
 torch.manual_seed(config["seed"])
 if config["cuda"]:
     torch.cuda.manual_seed(config["seed"])
-train_loader, W_true = load_data(config)
+X, W_true = load_data(config)
 
 wandb.run.summary['W_true'] = wandb.Table(data=pd.DataFrame(W_true))
 fig = viz_graph(W_true, size=(7, 7), show=config["fig_show"])
@@ -109,7 +105,7 @@ optimizer = torch.optim.Adam(
     lr=config["lr"]
 )
 #%%
-def train(rho, alpha, config, optimizer):
+def train(X, rho, alpha, config, optimizer):
     model.train()
     
     logs = {
@@ -119,39 +115,38 @@ def train(rho, alpha, config, optimizer):
         'aug': [],
     }
     
-    for batch_num, [train_batch] in enumerate(train_loader):
-        if config["cuda"]:
-            train_batch = train_batch.cuda()
-        
-        optimizer.zero_grad()
-        
-        recon = model(train_batch)
-        
-        loss_ = []    
-        
-        # reconstruction
-        recon = 0.5 * torch.pow(recon - train_batch, 2).sum() / train_batch.size(0)
-        loss_.append(('recon', recon))
+    if config["cuda"]:
+        X = X.cuda()
+    
+    optimizer.zero_grad()
+    
+    recon = model(X)
+    
+    loss_ = []    
+    
+    # reconstruction
+    recon = 0.5 * torch.pow(recon - X, 2).sum() / X.size(0)
+    loss_.append(('recon', recon))
 
-        # sparsity loss
-        L1 = config["lambda"] * torch.sum(torch.abs(model.W))
-        loss_.append(('L1', L1))
+    # sparsity loss
+    L1 = config["lambda"] * torch.sum(torch.abs(model.W))
+    loss_.append(('L1', L1))
 
-        # augmentation and lagrangian loss
-        h_A = h_fun(model.W, config["d"])
-        aug = 0.5 * rho * (h_A ** 2)
-        aug += alpha * h_A
-        loss_.append(('aug', aug))
-        
-        loss = sum([y for _, y in loss_])
-        loss_.append(('loss', loss))
-        
-        loss.backward()
-        optimizer.step()
-        
-        """accumulate losses"""
-        for x, y in loss_:
-            logs[x] = logs.get(x) + [y.item()]
+    # augmentation and lagrangian loss
+    h_A = h_fun(model.W, config["d"])
+    aug = 0.5 * rho * (h_A ** 2)
+    aug += alpha * h_A
+    loss_.append(('aug', aug))
+    
+    loss = sum([y for _, y in loss_])
+    loss_.append(('loss', loss))
+    
+    loss.backward()
+    optimizer.step()
+    
+    """accumulate losses"""
+    for x, y in loss_:
+        logs[x] = logs.get(x) + [y.item()]
             
     return logs, model.W
 #%%
@@ -167,7 +162,7 @@ for iteration in range(config["max_iter"]):
     while rho < config["rho_max"]:
         # find argmin of primal problem (local solution) = update for config["epochs"] times
         for epoch in tqdm.tqdm(range(config["epochs"]), desc="primal update"):
-            logs, W = train(rho, alpha, config, optimizer)
+            logs, W = train(X, rho, alpha, config, optimizer)
         # only one epoch is fine for finding argmin
         # logs, W = train(rho, alpha, config, optimizer)
         
@@ -181,6 +176,7 @@ for iteration in range(config["max_iter"]):
     if config["early_stopping"]:
         if np.mean(logs['recon']) / mse_save > config["early_stopping_threshold"] and h_new <= 1e-7:
             W_est = W_save
+            print("early stopping!")
             break
         else:
             W_save = W_est
@@ -205,6 +201,7 @@ for iteration in range(config["max_iter"]):
 #%%
 """final metrics"""
 W_est = W_est.numpy()
+W_est = W_est / np.max(np.abs(W_est))
 W_est[np.abs(W_est) < config["w_threshold"]] = 0.
 W_est = W_est.astype(float).round(2)
 

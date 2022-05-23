@@ -171,9 +171,10 @@ def load_data(config):
     )
     
     X = torch.FloatTensor(X)
-    data = TensorDataset(X)
-    data_loader = DataLoader(data, batch_size=config["batch_size"])
-    return data_loader, W
+    return X, W
+    # data = TensorDataset(X)
+    # data_loader = DataLoader(data, batch_size=config["batch_size"])
+    # return data_loader, W
 #%%
 def count_accuracy(B_true, B_est):
     """Compute various accuracy metrics for B_est.
