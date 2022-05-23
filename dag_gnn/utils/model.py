@@ -11,8 +11,8 @@ class Encoder(nn.Module):
     def __init__(self, 
                  config,
                  adj_A,
-                 hidden_dim,
-                 tol=0.1):
+                 hidden_dim):
+                #  tol=0.1):
         super(Encoder, self).__init__()
         
         self.config = config
@@ -91,6 +91,8 @@ def main():
     adj_A = np.zeros((config["d"], config["d"]))
     
     encoder = Encoder(config, adj_A, 32)
+    # for x in encoder.parameters():
+    #     print(x)
     h, logits, adj_A_amplified = encoder(torch.ones(b, config["d"], config["x_dim"]))
     assert h.shape == (b, config["d"], config["x_dim"])
     assert logits.shape == (b, config["d"], config["x_dim"])
@@ -98,6 +100,8 @@ def main():
     print("Encoder test pass!")
     
     decoder = Decoder(config, 32)
+    # for x in decoder.parameters():
+    #     print(x)
     recon, z = decoder(logits, adj_A_amplified, encoder.Wa)
     assert recon.shape == (b, config["d"], config["x_dim"])
     assert z.shape == (b, config["d"], config["x_dim"])

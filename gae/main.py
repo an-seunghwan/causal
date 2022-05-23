@@ -21,40 +21,44 @@ from utils.viz import (
     viz_heatmap,
 )
 
-from utils.model import (
-    Encoder,
-    Decoder
-)
+# from utils.model import (
+    
+# )
 #%%
 config = {
     "seed": 42,
     'data_type': 'synthetic', # discrete, real
-    "n": 5000,
-    "d": 10,
-    "degree": 2,
-    "x_dim": 1,
+    "n": 3000,
+    "d": 20,
+    "degree": 3,
     "graph_type": "ER",
     "sem_type": "gauss",
     "nonlinear_type": "nonlinear_2",
-    "hidden": 64,
+    "hidden_dim": 16,
+    "num_layer": 2,
+    "x_dim": 5,
+    "latent_dim": 3,
     
     "epochs": 300,
+    "init_epoch": 5,
     "lr": 0.003,
     "lr_decay": 200,
     "gamma": 1.,
     "batch_size": 100,
+    "early_stopping": True,
+    "early_stopping_threshold": 1.15,
     
     "rho": 1, # initial value
     "alpha": 0., # initial value
     "h": np.inf, # initial value
     
-    "max_iter": 100, 
+    "max_iter": 20, 
     "loss_type": 'l2',
     "h_tol": 1e-8, 
-    "w_threshold": 0.3,
-    "lambda": 1e-8,
+    "w_threshold": 0.2,
+    "lambda": 1.,
     "progress_rate": 0.25,
-    "rho_max": 1e+20, 
+    "rho_max": 1e+18, 
     "rho_rate": 10,
     
     "fig_show": True,
@@ -72,7 +76,7 @@ except:
     import wandb
 
 wandb.init(
-    project="(causal)DAG-GNN", 
+    project="(causal)GAE", 
     entity="anseunghwan",
     tags=["nonlinear"],
 )
@@ -90,14 +94,6 @@ fig = viz_graph(W_true, size=(7, 7), show=config["fig_show"])
 wandb.log({'Graph': wandb.Image(fig)})
 fig = viz_heatmap(W_true, size=(5, 4), show=config["fig_show"])
 wandb.log({'heatmap': wandb.Image(fig)})
-#%%
-# """Generate off-diagonal interaction graph"""
-# off_diagonal = np.ones((config["d"], config["d"])) - np.eye(config["d"])
-# rel_rec = torch.DoubleTensor(np.array(encode_onehot(np.where(off_diagonal)[1]), dtype=np.float64))
-# rel_send = torch.DoubleTensor(np.array(encode_onehot(np.where(off_diagonal)[0]), dtype=np.float64))
-
-"""initialize adjacency matrix A"""
-adj_A = np.zeros((config["d"], config["d"]))
 #%%
 def h_fun(A, d):
     x = torch.eye(d).float() + torch.div(A * A, d) # alpha = 1 / d

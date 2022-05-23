@@ -7,7 +7,10 @@ def viz_graph(W, size=(6, 6), show=False):
     """visualize weighted adj matrix of DAG"""
     fig = plt.figure(figsize=size)
     G = nx.from_numpy_matrix(W, create_using=nx.DiGraph)
-    layout = nx.planar_layout(G)
+    try:
+        layout = nx.planar_layout(G)
+    except:
+        layout = nx.spectral_layout(G)
     labels = nx.get_edge_attributes(G, 'weight')
     nx.draw(G, layout, 
             with_labels=True, 
