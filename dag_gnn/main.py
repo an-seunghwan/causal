@@ -26,6 +26,23 @@ from utils.model import (
     Decoder
 )
 #%%
+import sys
+import subprocess
+try:
+    import wandb
+except:
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "wandb"])
+    with open("../wandb_api.txt", "r") as f:
+        key = f.readlines()
+    subprocess.run(["wandb", "login"], input=key[0], encoding='utf-8')
+    import wandb
+
+wandb.init(
+    project="(causal)DAG-GNN", 
+    entity="anseunghwan",
+    tags=["nonlinear"],
+)
+#%%
 config = {
     "seed": 42,
     'data_type': 'synthetic', # discrete, real
@@ -59,23 +76,6 @@ config = {
     
     "fig_show": True,
 }
-#%%
-import sys
-import subprocess
-try:
-    import wandb
-except:
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "wandb"])
-    with open("../wandb_api.txt", "r") as f:
-        key = f.readlines()
-    subprocess.run(["wandb", "login"], input=key[0], encoding='utf-8')
-    import wandb
-
-wandb.init(
-    project="(causal)DAG-GNN", 
-    entity="anseunghwan",
-    tags=["nonlinear"],
-)
 #%%
 config["cuda"] = torch.cuda.is_available()
 
@@ -169,7 +169,7 @@ def train(rho, alpha, h, config, optimizer):
         loss_ = []    
         
         # reconstruction
-        recon = torch.pow(recon - train_batch, 2).sum() / train_batch.size(0)
+        recon = 0.5 * torch.pow(recon - train_batch, 2).sum() / train_batch.size(0)
         loss_.append(('recon', recon))
 
         # KL-divergence

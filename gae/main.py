@@ -21,9 +21,26 @@ from utils.viz import (
     viz_heatmap,
 )
 
-# from utils.model import (
-    
-# )
+from utils.model import (
+    GAE
+)
+#%%
+import sys
+import subprocess
+try:
+    import wandb
+except:
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "wandb"])
+    with open("../wandb_api.txt", "r") as f:
+        key = f.readlines()
+    subprocess.run(["wandb", "login"], input=key[0], encoding='utf-8')
+    import wandb
+
+wandb.init(
+    project="(causal)GAE", 
+    entity="anseunghwan",
+    tags=["nonlinear"],
+)
 #%%
 config = {
     "seed": 42,
@@ -40,11 +57,11 @@ config = {
     "latent_dim": 3,
     
     "epochs": 300,
-    "init_epoch": 5,
     "lr": 0.003,
     "lr_decay": 200,
     "gamma": 1.,
     "batch_size": 100,
+    "init_iter": 5,
     "early_stopping": True,
     "early_stopping_threshold": 1.15,
     
@@ -64,23 +81,6 @@ config = {
     "fig_show": True,
 }
 #%%
-import sys
-import subprocess
-try:
-    import wandb
-except:
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "wandb"])
-    with open("../wandb_api.txt", "r") as f:
-        key = f.readlines()
-    subprocess.run(["wandb", "login"], input=key[0], encoding='utf-8')
-    import wandb
-
-wandb.init(
-    project="(causal)GAE", 
-    entity="anseunghwan",
-    tags=["nonlinear"],
-)
-#%%
 config["cuda"] = torch.cuda.is_available()
 
 set_random_seed(config["seed"])
@@ -99,51 +99,22 @@ def h_fun(A, d):
     x = torch.eye(d).float() + torch.div(A * A, d) # alpha = 1 / d
     return torch.trace(torch.matrix_power(x, d)) - d
 #%%
-encoder = Encoder(config, adj_A, 32)
-decoder = Decoder(config, 32)
+model = GAE(config)
 
 if config["cuda"]:
-    encoder.cuda()
-    decoder.cuda()
+    model.cuda()
 
 optimizer = torch.optim.Adam(
-    list(encoder.parameters()) + list(decoder.parameters()), 
+    model.parameters(), 
     lr=config["lr"]
 )
-torch.optim.lr_scheduler.StepLR(
-    optimizer, 
-    step_size=config["lr_decay"],
-    gamma=config["gamma"]
-)
-
-def update_optimizer(optimizer, lr, rho):
-    """related to lr to rho, whenever rho gets big, reduce lr propotionally"""
-    MAX_LR = 1e-2
-    MIN_LR = 1e-4
-    
-    estimated_lr = lr / (math.log10(rho) + 1e-10)
-    if estimated_lr > MAX_LR:
-        lr = MAX_LR
-    elif estimated_lr < MIN_LR:
-        lr = MIN_LR
-    else:
-        lr = estimated_lr
-    
-    for param_group in optimizer.param_groups:
-        param_group["lr"] = lr
-    return optimizer, lr
 #%%
-def train(rho, alpha, h, config, optimizer):
-    encoder.train()
-    decoder.train()
-    
-    # update optimizer
-    optimizer, lr = update_optimizer(optimizer, config["lr"], rho)
+def train(rho, alpha, config, optimizer):
+    model.train()
     
     logs = {
         'loss': [], 
         'recon': [],
-        'kl': [],
         'L1': [],
         'aug': [],
     }
@@ -154,35 +125,22 @@ def train(rho, alpha, h, config, optimizer):
         
         optimizer.zero_grad()
         
-        logits, h, adj_A_amplified = encoder(train_batch)
-        recon, z = decoder(logits, adj_A_amplified, encoder.Wa)
+        recon = model(train_batch)
         
-        if torch.sum(adj_A_amplified != adj_A_amplified):
-            print('nan error\n')
-        if torch.sum(recon != recon):
-            print('nan error\n')
-            
         loss_ = []    
         
         # reconstruction
-        recon = torch.pow(recon - train_batch, 2).sum() / train_batch.size(0)
+        recon = 0.5 * torch.pow(recon - train_batch, 2).sum() / train_batch.size(0)
         loss_.append(('recon', recon))
 
-        # KL-divergence
-        kl = torch.pow(logits, 2).sum()
-        kl = 0.5 * kl / logits.size(0)
-        loss_.append(('kl', kl))
-
         # sparsity loss
-        L1 = config["lambda"] * torch.sum(torch.abs(adj_A_amplified))
+        L1 = config["lambda"] * torch.sum(torch.abs(model.W))
         loss_.append(('L1', L1))
 
         # augmentation and lagrangian loss
-        h_A = h_fun(adj_A_amplified, config["d"])
+        h_A = h_fun(model.W, config["d"])
         aug = 0.5 * rho * (h_A ** 2)
         aug += alpha * h_A
-        """?????"""
-        aug += 100. * torch.trace(adj_A_amplified * adj_A_amplified)
         loss_.append(('aug', aug))
         
         loss = sum([y for _, y in loss_])
@@ -195,11 +153,13 @@ def train(rho, alpha, h, config, optimizer):
         for x, y in loss_:
             logs[x] = logs.get(x) + [y.item()]
             
-    return logs, adj_A_amplified
+    return logs, model.W
 #%%
 rho = config["rho"]
 alpha = config["alpha"]
 h = config["h"]
+mse_save = np.inf
+W_save = None
     
 for iteration in range(config["max_iter"]):
     
@@ -207,16 +167,24 @@ for iteration in range(config["max_iter"]):
     while rho < config["rho_max"]:
         # find argmin of primal problem (local solution) = update for config["epochs"] times
         for epoch in tqdm.tqdm(range(config["epochs"]), desc="primal update"):
-            logs, adj_A_amplified = train(rho, alpha, h, config, optimizer)
+            logs, W = train(rho, alpha, config, optimizer)
         # only one epoch is fine for finding argmin
-        # logs, adj_A_amplified = train(rho, alpha, h, config, optimizer)
+        # logs, W = train(rho, alpha, config, optimizer)
         
-        W_est = adj_A_amplified.data.clone()
+        W_est = W.data.clone()
         h_new = h_fun(W_est, config["d"])
         if h_new.item() > config["progress_rate"] * h:
             rho *= config["rho_rate"]
         else:
             break
+    
+    if config["early_stopping"]:
+        if np.mean(logs['recon']) / mse_save > config["early_stopping_threshold"] and h_new <= 1e-7:
+            W_est = W_save
+            break
+        else:
+            W_save = W_est
+            mse_save = np.mean(logs['recon'])
     
     """dual ascent"""
     h = h_new.item()
@@ -232,7 +200,7 @@ for iteration in range(config["max_iter"]):
     wandb.log({'h(W)' : h})
     
     """stopping rule"""
-    if h_new.item() <= config["h_tol"]:
+    if h_new.item() <= config["h_tol"] and iteration > config["init_iter"]:
         break
 #%%
 """final metrics"""
