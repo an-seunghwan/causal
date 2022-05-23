@@ -23,6 +23,8 @@ from utils.viz import (
 from utils.model import (
     GAE
 )
+
+from utils.trac_exp import trace_expm
 #%%
 import sys
 import subprocess
@@ -42,11 +44,11 @@ wandb.init(
 )
 #%%
 config = {
-    "seed": 1230,
+    "seed": 520,
     'data_type': 'synthetic', # discrete, real
     "n": 3000,
-    "d": 20,
-    "degree": 3,
+    "d": 10,
+    "degree": 2,
     "graph_type": "ER",
     "sem_type": "gauss",
     "nonlinear_type": "nonlinear_1",
@@ -91,9 +93,15 @@ wandb.log({'Graph': wandb.Image(fig)})
 fig = viz_heatmap(W_true, size=(5, 4), show=config["fig_show"])
 wandb.log({'heatmap': wandb.Image(fig)})
 #%%
-def h_fun(A, d):
-    x = torch.eye(d).float() + torch.div(A * A, d) # alpha = 1 / d
-    return torch.trace(torch.matrix_power(x, d)) - d
+def h_fun(W):
+    """Evaluate DAGness constraint"""
+    h = trace_expm(W * W) - W.shape[0]
+    return h
+
+# def h_fun(A, d):
+#     """Evaluate DAGness constraint"""
+#     x = torch.eye(d).float() + torch.div(A * A, d) # alpha = 1 / d
+#     return torch.trace(torch.matrix_power(x, d)) - d
 #%%
 model = GAE(config)
 
@@ -133,7 +141,7 @@ def train(X, rho, alpha, config, optimizer):
     loss_.append(('L1', L1))
 
     # augmentation and lagrangian loss
-    h_A = h_fun(model.W, config["d"])
+    h_A = h_fun(model.W)
     aug = 0.5 * rho * (h_A ** 2)
     aug += alpha * h_A
     loss_.append(('aug', aug))
@@ -148,7 +156,7 @@ def train(X, rho, alpha, config, optimizer):
     for x, y in loss_:
         logs[x] = logs.get(x) + [y.item()]
             
-    return logs, model.W
+    return logs, model.W.detach()
 #%%
 rho = config["rho"]
 alpha = config["alpha"]
@@ -167,7 +175,7 @@ for iteration in range(config["max_iter"]):
         # logs, W = train(rho, alpha, config, optimizer)
         
         W_est = W.data.clone()
-        h_new = h_fun(W_est, config["d"])
+        h_new = h_fun(W_est)
         if h_new.item() > config["progress_rate"] * h:
             rho *= config["rho_rate"]
         else:
@@ -200,7 +208,7 @@ for iteration in range(config["max_iter"]):
         break
 #%%
 """final metrics"""
-W_est = W_est.numpy()
+W_est = W_est.data.numpy()
 W_est = W_est / np.max(np.abs(W_est))
 W_est[np.abs(W_est) < config["w_threshold"]] = 0.
 W_est = W_est.astype(float).round(2)

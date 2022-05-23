@@ -151,9 +151,9 @@ def simulate_sem(W: np.ndarray,
             X[:, :, i] = np.random.normal(scale=scale, size=1) * X[:, :, 0]
             X[:, :, i] += np.random.normal(scale=scale, size=1)
             X[:, :, i] += np.random.normal(scale=scale, size=(n, d))
-    X[:, :, 0] = np.random.normal(scale=scale, size=1) * X[:, :, 0]
-    X[:, :, 0] += np.random.normal(scale=scale, size=1)
-    X[:, :, 0] += np.random.normal(scale=scale, size=(n, d))
+        X[:, :, 0] = np.random.normal(scale=scale, size=1) * X[:, :, 0]
+        X[:, :, 0] += np.random.normal(scale=scale, size=1)
+        X[:, :, 0] += np.random.normal(scale=scale, size=(n, d))
     return X
 #%%
 def load_data(config):

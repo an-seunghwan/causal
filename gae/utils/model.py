@@ -35,7 +35,11 @@ class GAE(nn.Module):
         
         self.init_weights()
         
+        # weighted adjacency matrix
         W = torch.rand(config["d"], config["d"])
+        min = -0.1
+        max = 0.1
+        W = (max - min) * W + min # ~ Uniform(-0.1, 0.1)
         W = W.fill_diagonal_(0.)
         self.W = nn.Parameter(W, requires_grad=True)
     
