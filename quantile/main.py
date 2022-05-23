@@ -133,7 +133,7 @@ def loss_function(X, W_est, alpha, rho, config, quantiles):
     return loss
 #%%
 def main():
-    config = vars(get_args(debug=False)) # default configuration
+    config = vars(get_args(debug=True)) # default configuration
     wandb.config.update(config)
 
     """simulate DAG and weighted adjacency matrix"""
@@ -148,6 +148,52 @@ def main():
     wandb.log({'heatmap': wandb.Image(fig)})
 
     """simulate dataset"""
+    # Learning Multiple Quantiles With Neural Networks
+    # M1 setting
+    X = np.random.uniform(low=-1, high=1, size=(config["n"], config["d"]))
+    epsilon = np.random.normal(scale=np.sqrt(np.exp(1. - X[:, 0]) / 10.))
+    y = np.sin(np.pi * X[:, 0]) / (np.pi * X[:, 0]) + epsilon
+    plt.scatter(X[:, 0], y)
+    
+    # M2 setting
+    X = np.random.uniform(low=-2, high=2, size=(500, 2))
+    y = -((np.arange(2) + 1.) * X).sum(axis=1)
+    norm = (X ** 2).sum(axis=1)
+    norm = norm * (norm >= 1).astype(float)
+    norm = np.where(norm <= 4, norm, 4)
+    scale = np.sqrt(np.exp(1. + norm / 2.))
+    epsilon = np.random.normal(scale=scale)
+    y += epsilon
+    plt.scatter(X[:, 1], y)
+    
+    d = config["d"]
+    n = config["n"]
+    scale_vec = np.ones(d)
+    
+    # empirical risk
+    G = ig.Graph.Weighted_Adjacency(W_true.tolist())
+    ordered_vertices = G.topological_sorting()
+    assert len(ordered_vertices) == d
+    
+    X = np.zeros((n, d))
+    j = 1
+    for j in ordered_vertices:
+        parents = G.neighbors(j, mode=ig.IN)
+        # X[:, j] = _simulate_single_equation(X[:, parents], W[parents, j], scale_vec[j])
+        x, w = X[:, parents], W_true[parents, j]
+        if len(parents) == 0:
+            h = np.random.uniform(low=-1, high=1, size=n)
+        else:
+            h = (np.sin(np.pi * x) / (np.pi * x)).dot(w)
+            epsilon = np.random.normal(scale=np.exp(1. - h) / 10.)
+            h += epsilon
+        X[:, j] = h
+    
+    j = 1
+    parents = G.neighbors(j, mode=ig.IN)
+    plt.scatter(X[:, parents[0]], X[:, j])
+    
+    
     X = simulate_linear_sem(W_true, config["n"], config["sem_type"], normalize=True)
     n, d = X.shape
     assert n == config["n"]
