@@ -53,11 +53,11 @@ config = {
     "nonlinear_type": "nonlinear_2",
     "hidden_dim": 16,
     "num_layer": 2,
-    "x_dim": 5,
-    "latent_dim": 3,
+    "x_dim": 1,
+    "latent_dim": 1,
     
     "epochs": 300,
-    "lr": 0.003,
+    "lr": 0.001,
     "lr_decay": 200,
     "gamma": 1.,
     "batch_size": 100,
@@ -204,8 +204,7 @@ for iteration in range(config["max_iter"]):
         break
 #%%
 """final metrics"""
-adj_A_amplified = encoder.amplified_adjacency_matrix()
-W_est = adj_A_amplified.data.clone().numpy()
+W_est = W_est.numpy()
 W_est[np.abs(W_est) < config["w_threshold"]] = 0.
 W_est = W_est.astype(float).round(2)
 
