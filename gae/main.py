@@ -44,7 +44,7 @@ wandb.init(
 )
 #%%
 config = {
-    "seed": 520,
+    "seed": 1,
     'data_type': 'synthetic', # discrete, real
     "n": 3000,
     "d": 10,
@@ -113,7 +113,7 @@ optimizer = torch.optim.Adam(
     lr=config["lr"]
 )
 #%%
-def train(X, rho, alpha, config, optimizer):
+def train(model, X, rho, alpha, config, optimizer):
     model.train()
     
     logs = {
@@ -156,7 +156,7 @@ def train(X, rho, alpha, config, optimizer):
     for x, y in loss_:
         logs[x] = logs.get(x) + [y.item()]
             
-    return logs, model.W.detach()
+    return logs
 #%%
 rho = config["rho"]
 alpha = config["alpha"]
@@ -168,21 +168,31 @@ for iteration in range(config["max_iter"]):
     
     """primal problem"""
     while rho < config["rho_max"]:
+        # h_old = np.inf
         # find argmin of primal problem (local solution) = update for config["epochs"] times
         for epoch in tqdm.tqdm(range(config["epochs"]), desc="primal update"):
-            logs, W = train(X, rho, alpha, config, optimizer)
+            logs = train(model, X, rho, alpha, config, optimizer)
+            
+            # """FIXME"""
+            # W_est = model.W.detach().data.clone()
+            # h_new = h_fun(W_est).item()
+            # # no change in weight estimation (convergence)
+            # if abs(h_old - h_new) < 1e-12: 
+            #     break
+            # h_old = h_new
+            
         # only one epoch is fine for finding argmin
-        # logs, W = train(rho, alpha, config, optimizer)
+        # logs = train(model, X, rho, alpha, config, optimizer)
         
-        W_est = W.data.clone()
-        h_new = h_fun(W_est)
-        if h_new.item() > config["progress_rate"] * h:
+        W_est = model.W.detach().data.clone()
+        h_current = h_fun(W_est)
+        if h_current.item() > config["progress_rate"] * h:
             rho *= config["rho_rate"]
         else:
             break
     
     if config["early_stopping"]:
-        if np.mean(logs['recon']) / mse_save > config["early_stopping_threshold"] and h_new <= 1e-7:
+        if np.mean(logs['recon']) / mse_save > config["early_stopping_threshold"] and h_current.item() <= 1e-7:
             W_est = W_save
             print("early stopping!")
             break
@@ -191,8 +201,8 @@ for iteration in range(config["max_iter"]):
             mse_save = np.mean(logs['recon'])
     
     """dual ascent"""
-    h = h_new.item()
-    alpha += config["rho"] * h_new.item()
+    h = h_current.item()
+    alpha += rho * h_current.item()
     
     print_input = "[iteration {:03d}]".format(iteration)
     print_input += ''.join([', {}: {:.4f}'.format(x, np.mean(y).round(2)) for x, y in logs.items()])
@@ -204,11 +214,11 @@ for iteration in range(config["max_iter"]):
     wandb.log({'h(W)' : h})
     
     """stopping rule"""
-    if h_new.item() <= config["h_tol"] and iteration > config["init_iter"]:
+    if h_current.item() <= config["h_tol"] and iteration > config["init_iter"]:
         break
 #%%
 """final metrics"""
-W_est = W_est.data.numpy()
+W_est = W_est.numpy()
 W_est = W_est / np.max(np.abs(W_est))
 W_est[np.abs(W_est) < config["w_threshold"]] = 0.
 W_est = W_est.astype(float).round(2)

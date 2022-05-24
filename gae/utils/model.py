@@ -33,7 +33,7 @@ class GAE(nn.Module):
         decoder.append(nn.Linear(in_dim, config["x_dim"]))
         self.decoder = nn.ModuleList(decoder)
         
-        self.init_weights()
+        # self.init_weights()
         
         # weighted adjacency matrix
         W = torch.rand(config["d"], config["d"])
@@ -43,13 +43,13 @@ class GAE(nn.Module):
         W = W.fill_diagonal_(0.)
         self.W = nn.Parameter(W, requires_grad=True)
     
-    def init_weights(self):
-        for m in self.modules():
-            if isinstance(m, nn.Linear):
-                nn.init.xavier_normal_(m.weight.data)
-            elif isinstance(m, nn.BatchNorm1d):
-                m.weight.data.fill_(1)
-                m.bias.data.zero_()
+    # def init_weights(self):
+    #     for m in self.modules():
+    #         if isinstance(m, nn.Linear):
+    #             nn.init.xavier_normal_(m.weight.data)
+    #         elif isinstance(m, nn.BatchNorm1d):
+    #             m.weight.data.fill_(1)
+    #             m.bias.data.zero_()
     
     def forward(self, input):
         h = input.reshape(-1, self.config["x_dim"])
@@ -59,9 +59,11 @@ class GAE(nn.Module):
         # causal structure
         h = h.reshape(-1, self.config["d"], self.config["latent_dim"])
         h = torch.matmul(self.W.t(), h)
+        h = h.reshape(-1, self.config["latent_dim"])
         # decoder
         for d in self.decoder:
             h = d(h)
+        h = h.reshape(-1, self.config["d"], self.config["x_dim"])
         return h
 #%%
 def main():

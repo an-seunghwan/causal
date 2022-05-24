@@ -1,7 +1,7 @@
 #%%
 import torch
-from torch.utils.data.dataset import TensorDataset
-from torch.utils.data import DataLoader
+# from torch.utils.data.dataset import TensorDataset
+# from torch.utils.data import DataLoader
 
 import numpy as np
 import random
@@ -98,12 +98,13 @@ def simulate_sem(W: np.ndarray,
         if nonlinear_type == 'nonlinear_1':
             h = np.cos(x + 1).dot(w)
         elif nonlinear_type == 'nonlinear_2':
-            h = 2. * np.sin((x + 0.5).dot(w)) + (x + 0.5).dot(w)
+            eta = (x + 0.5).dot(w)
+            h = 2. * np.sin(eta) + eta
         else:
             raise ValueError('unknown nonlinear type')
         
         if sem_type == 'gauss':
-            z = scale * np.random.normal(size=n)
+            z = np.random.normal(scale=scale, size=n)
             h += z
         elif sem_type == 'exp':
             z = np.random.exponential(scale=scale, size=n)
