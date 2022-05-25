@@ -132,7 +132,7 @@ def update_optimizer(optimizer, lr, rho):
         param_group["lr"] = lr
     return optimizer, lr
 #%%
-def train(rho, alpha, h, config, optimizer):
+def train(rho, alpha, config, optimizer):
     encoder.train()
     decoder.train()
     
@@ -206,9 +206,9 @@ for iteration in range(config["max_iter"]):
     while rho < config["rho_max"]:
         # find argmin of primal problem (local solution) = update for config["epochs"] times
         for epoch in tqdm.tqdm(range(config["epochs"]), desc="primal update"):
-            logs, adj_A_amplified = train(rho, alpha, h, config, optimizer)
+            logs, adj_A_amplified = train(rho, alpha, config, optimizer)
         # only one epoch is fine for finding argmin
-        # logs, adj_A_amplified = train(rho, alpha, h, config, optimizer)
+        # logs, adj_A_amplified = train(rho, alpha, config, optimizer)
         
         W_est = adj_A_amplified.data.clone()
         h_new = h_fun(W_est, config["d"])

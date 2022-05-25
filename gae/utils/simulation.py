@@ -1,7 +1,7 @@
 #%%
 import torch
-# from torch.utils.data.dataset import TensorDataset
-# from torch.utils.data import DataLoader
+from torch.utils.data.dataset import TensorDataset
+from torch.utils.data import DataLoader
 
 import numpy as np
 import random
@@ -172,10 +172,10 @@ def load_data(config):
     )
     
     X = torch.FloatTensor(X)
-    return X, W
-    # data = TensorDataset(X)
-    # data_loader = DataLoader(data, batch_size=config["batch_size"])
-    # return data_loader, W
+    # return X, W
+    data = TensorDataset(X)
+    data_loader = DataLoader(data, batch_size=config["batch_size"])
+    return data_loader, W
 #%%
 def count_accuracy(B_true, B_est):
     """Compute various accuracy metrics for B_est.

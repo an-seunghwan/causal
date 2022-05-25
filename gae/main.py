@@ -46,7 +46,7 @@ wandb.init(
 config = {
     "seed": 1,
     'data_type': 'synthetic', # discrete, real
-    "n": 3000,
+    "n": 5000,
     "d": 10,
     "degree": 2,
     "graph_type": "ER",
@@ -58,7 +58,8 @@ config = {
     "latent_dim": 1,
     
     "epochs": 300,
-    "lr": 0.001,
+    "batch_size": 100,
+    "lr": 0.003,
     "init_iter": 5,
     "early_stopping": True,
     "early_stopping_threshold": 1.15,
@@ -71,12 +72,12 @@ config = {
     "loss_type": 'l2',
     "h_tol": 1e-12, 
     "w_threshold": 0.2,
-    "lambda": 1.,
+    "lambda": 0.,
     "progress_rate": 0.25,
     "rho_max": 1e+18, 
     "rho_rate": 10,
     
-    "fig_show": True,
+    "fig_show": False,
 }
 #%%
 config["cuda"] = torch.cuda.is_available()
@@ -85,7 +86,7 @@ set_random_seed(config["seed"])
 torch.manual_seed(config["seed"])
 if config["cuda"]:
     torch.cuda.manual_seed(config["seed"])
-X, W_true = load_data(config)
+train_loader, W_true = load_data(config)
 
 wandb.run.summary['W_true'] = wandb.Table(data=pd.DataFrame(W_true))
 fig = viz_graph(W_true, size=(7, 7), show=config["fig_show"])
@@ -97,11 +98,6 @@ def h_fun(W):
     """Evaluate DAGness constraint"""
     h = trace_expm(W * W) - W.shape[0]
     return h
-
-# def h_fun(A, d):
-#     """Evaluate DAGness constraint"""
-#     x = torch.eye(d).float() + torch.div(A * A, d) # alpha = 1 / d
-#     return torch.trace(torch.matrix_power(x, d)) - d
 #%%
 model = GAE(config)
 
@@ -113,8 +109,11 @@ optimizer = torch.optim.Adam(
     lr=config["lr"]
 )
 #%%
-def train(model, X, rho, alpha, config, optimizer):
+def train(model, rho, alpha, config, optimizer):
     model.train()
+    
+    if config["cuda"]:
+        X = X.cuda()
     
     logs = {
         'loss': [], 
@@ -123,39 +122,40 @@ def train(model, X, rho, alpha, config, optimizer):
         'aug': [],
     }
     
-    if config["cuda"]:
-        X = X.cuda()
-    
-    optimizer.zero_grad()
-    
-    recon = model(X)
-    
-    loss_ = []    
-    
-    # reconstruction
-    recon = 0.5 * torch.pow(recon - X, 2).sum() / X.size(0)
-    loss_.append(('recon', recon))
-
-    # sparsity loss
-    L1 = config["lambda"] * torch.sum(torch.abs(model.W))
-    loss_.append(('L1', L1))
-
-    # augmentation and lagrangian loss
-    h_A = h_fun(model.W)
-    aug = 0.5 * rho * (h_A ** 2)
-    aug += alpha * h_A
-    loss_.append(('aug', aug))
-    
-    loss = sum([y for _, y in loss_])
-    loss_.append(('loss', loss))
-    
-    loss.backward()
-    optimizer.step()
-    
-    """accumulate losses"""
-    for x, y in loss_:
-        logs[x] = logs.get(x) + [y.item()]
+    for batch_num, [train_batch] in enumerate(train_loader):
+        if config["cuda"]:
+            train_batch = train_batch.cuda()
             
+        optimizer.zero_grad()
+        
+        recon = model(train_batch)
+        
+        loss_ = []    
+        
+        # reconstruction
+        recon = 0.5 * torch.pow(recon - train_batch, 2).sum() / train_batch.size(0)
+        loss_.append(('recon', recon))
+
+        # sparsity loss
+        L1 = config["lambda"] * torch.sum(torch.abs(model.W))
+        loss_.append(('L1', L1))
+
+        # augmentation and lagrangian loss
+        h_A = h_fun(model.W)
+        aug = 0.5 * rho * (h_A ** 2)
+        aug += alpha * h_A
+        loss_.append(('aug', aug))
+        
+        loss = sum([y for _, y in loss_])
+        loss_.append(('loss', loss))
+        
+        loss.backward()
+        optimizer.step()
+        
+        """accumulate losses"""
+        for x, y in loss_:
+            logs[x] = logs.get(x) + [y.item()]
+    
     return logs
 #%%
 rho = config["rho"]
@@ -171,7 +171,7 @@ for iteration in range(config["max_iter"]):
         # h_old = np.inf
         # find argmin of primal problem (local solution) = update for config["epochs"] times
         for epoch in tqdm.tqdm(range(config["epochs"]), desc="primal update"):
-            logs = train(model, X, rho, alpha, config, optimizer)
+            logs = train(model, rho, alpha, config, optimizer)
             
             # """FIXME"""
             # W_est = model.W.detach().data.clone()
@@ -219,7 +219,7 @@ for iteration in range(config["max_iter"]):
 #%%
 """final metrics"""
 W_est = W_est.numpy()
-W_est = W_est / np.max(np.abs(W_est))
+W_est = W_est / np.max(np.abs(W_est)) # normalize weighted adjacency matrix
 W_est[np.abs(W_est) < config["w_threshold"]] = 0.
 W_est = W_est.astype(float).round(2)
 
