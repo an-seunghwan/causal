@@ -12,7 +12,6 @@ class Encoder(nn.Module):
                  config,
                  adj_A,
                  hidden_dim):
-                #  tol=0.1):
         super(Encoder, self).__init__()
         
         self.config = config
@@ -20,8 +19,6 @@ class Encoder(nn.Module):
         self.fc1 = nn.Linear(config["x_dim"], hidden_dim, bias=True)
         self.fc2 = nn.Linear(hidden_dim, config["x_dim"], bias=True)
         self.Wa = nn.Parameter(torch.zeros(config["x_dim"]), requires_grad=True)
-        # self.z = nn.Parameter(torch.tensor(tol))
-        # self.z_positive = nn.Parameter(torch.ones_like(torch.from_numpy(adj_A)).float())
         self.init_weights()
     
     def init_weights(self):

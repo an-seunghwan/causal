@@ -103,7 +103,7 @@ except:
     import wandb
 
 wandb.init(
-    project="causal", 
+    project="(causal)NOTEARS", 
     entity="anseunghwan",
     tags=["notears", "linear"],
     # name='notears'

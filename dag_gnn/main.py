@@ -69,7 +69,7 @@ config = {
     "loss_type": 'l2',
     "h_tol": 1e-8, 
     "w_threshold": 0.3,
-    "lambda": 1e-8,
+    "lambda": 0.,
     "progress_rate": 0.25,
     "rho_max": 1e+20, 
     "rho_rate": 10,
@@ -91,11 +91,6 @@ wandb.log({'Graph': wandb.Image(fig)})
 fig = viz_heatmap(W_true, size=(5, 4), show=config["fig_show"])
 wandb.log({'heatmap': wandb.Image(fig)})
 #%%
-# """Generate off-diagonal interaction graph"""
-# off_diagonal = np.ones((config["d"], config["d"])) - np.eye(config["d"])
-# rel_rec = torch.DoubleTensor(np.array(encode_onehot(np.where(off_diagonal)[1]), dtype=np.float64))
-# rel_send = torch.DoubleTensor(np.array(encode_onehot(np.where(off_diagonal)[0]), dtype=np.float64))
-
 """initialize adjacency matrix A"""
 adj_A = np.zeros((config["d"], config["d"]))
 #%%
@@ -103,8 +98,8 @@ def h_fun(A, d):
     x = torch.eye(d).float() + torch.div(A * A, d) # alpha = 1 / d
     return torch.trace(torch.matrix_power(x, d)) - d
 #%%
-encoder = Encoder(config, adj_A, 32)
-decoder = Decoder(config, 32)
+encoder = Encoder(config, adj_A, config["hidden"])
+decoder = Decoder(config, config["hidden"])
 
 if config["cuda"]:
     encoder.cuda()
@@ -224,7 +219,7 @@ for iteration in range(config["max_iter"]):
     
     """dual ascent"""
     h = h_new.item()
-    alpha += config["rho"] * h_new.item()
+    alpha += rho * h_new.item()
     
     print_input = "[iteration {:03d}]".format(iteration)
     print_input += ''.join([', {}: {:.4f}'.format(x, np.mean(y).round(2)) for x, y in logs.items()])
