@@ -1,4 +1,4 @@
-# causal
+# Causal Structure Learning
 
 This repository is unofficial implementation of following papers with pytorch. The corresponding folder name is written in parenthesis.
 
