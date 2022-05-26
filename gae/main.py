@@ -44,7 +44,7 @@ wandb.init(
 )
 #%%
 config = {
-    "seed": 1,
+    "seed": 7,
     'data_type': 'synthetic', # discrete, real
     "n": 5000,
     "d": 10,
