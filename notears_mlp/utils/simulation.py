@@ -68,11 +68,12 @@ def simulate_dag(d, s0, graph_type):
     
     return B_perm
 #%%
-def simulate_nonlinear_sem(B, n, noise_scale=None):
+def simulate_nonlinear_sem(B, n, sem_type, noise_scale=None):
     """Simulate samples from nonlinear SEM.
     Args:
         B (np.ndarray): [d, d] binary adj matrix of DAG
         n (int): num of samples
+        sem_type (str): mlp, mim, gp, gp-add
         noise_scale (np.ndarray): scale parameter of additive noise, default all ones
         
     Returns:
@@ -94,43 +95,34 @@ def simulate_nonlinear_sem(B, n, noise_scale=None):
         if parent_size == 0:
             return z
         
+        weight_range = (0.5, 2.)
+        low, high = weight_range
+        
         if sem_type == "mlp":
             # sampling MLP weights
             hidden = 100
-            weight_range = (0.5, 2.)
-            low, high = weight_range
             W1 = np.random.uniform(low=low, high=high, size=[parent_size, hidden])
-            W1[np.random.rand()]
+            W1[np.random.rand(W1.shape[0], W1.shape[1]) < 0.5] *= -1
+            W2 = np.random.uniform(low=low, high=high, size=hidden)
+            W2[np.random.rand(W2.shape[0]) < 0.5] *= -1
+            x = sigmoid(x @ W1) @ W2 + z
         elif sem_type == "mim":
-            
+            W1 = np.random.uniform(low=low, high=high, size=parent_size)
+            W1[np.random.rand(W1.shape[0]) < 0.5] *= -1
+            W2 = np.random.uniform(low=low, high=high, size=parent_size)
+            W2[np.random.rand(W2.shape[0]) < 0.5] *= -1
+            W3 = np.random.uniform(low=low, high=high, size=parent_size)
+            W3[np.random.rand(W3.shape[0]) < 0.5] *= -1
+            x = np.tanh(x @ W1) + np.cos(x @ W2) + np.sin(x @ W3) + z
+        
         # """FIXME"""
         # elif sem_type == "gp":
+        
         # """FIXME"""
         # elif sem_type == "gp-add":
         
         else:
             raise ValueError('unknown sem type')
-        '''generate MLP weights'''
-        low, high = weight_range
-        for i, h_dim in enumerate(hidden_dims):
-            weight = torch.FloatTensor(x.shape[1], h_dim).uniform_(low, high)
-            weight[(np.random.rand(weight.shape[0], weight.shape[1]) < 0.5).nonzero()] *= -1 # determine sign
-            if i == 0:
-                bias = 0.
-            else:
-                bias = torch.FloatTensor(1, h_dim).uniform_(low, high)
-                bias[(np.random.rand(bias.shape[0], bias.shape[1]) < 0.5).nonzero()] *= -1 # determine sign
-            if activation == 'sigmoid':
-                x = torch.sigmoid(x @ weight + bias)
-            elif activation == 'relu':
-                x = torch.relu(x @ weight + bias)
-            elif activation == 'tanh':
-                x = torch.tanh(x @ weight + bias)
-            else:
-                raise ValueError('unknown activation')
-        weight = torch.FloatTensor(x.shape[1], 1).uniform_(low, high)
-        weight[(np.random.rand(weight.shape[0], weight.shape[1]) < 0.5).nonzero()] *= -1 # determine sign
-        x = x @ weight + z
         return x
     
     d = B.shape[0]

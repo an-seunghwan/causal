@@ -132,7 +132,7 @@ def train(model, rho, alpha, config, optimizer):
         
         recon = model(train_batch)
         
-        loss_ = []    
+        loss_ = []
         
         # reconstruction
         recon = 0.5 * torch.pow(recon - train_batch, 2).sum() / train_batch.size(0)
