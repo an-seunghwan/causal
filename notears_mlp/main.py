@@ -45,11 +45,18 @@ wandb.init(
     # name='notears'
 )
 #%%
+import ast
+def arg_as_list(s):
+    v = ast.literal_eval(s)
+    if type(v) is not list:
+        raise argparse.ArgumentTypeError("Argument \"%s\" is not a list" % (s))
+    return v
+#%%
 import argparse
 def get_args(debug):
     parser = argparse.ArgumentParser('parameters')
 
-    parser.add_argument('--seed', type=int, default=10, 
+    parser.add_argument('--seed', type=int, default=123, 
                         help='seed for repeatable results')
     parser.add_argument('--n', default=200, type=int,
                         help='the number of dataset')
@@ -69,12 +76,13 @@ def get_args(debug):
     parser.add_argument('--h', default=np.inf, type=float,
                         help='h')
     
+    parser.add_argument("--hidden_dim", default=[10], type=arg_as_list,
+                        help="hidden dimensions for MLP")
+    
     parser.add_argument('--epochs', default=300, type=float,
                         help='learning rate')
     parser.add_argument('--lr', default=0.001, type=float,
                         help='learning rate')
-    parser.add_argument('--loss_type', type=str, default='l2',
-                        help='loss type')
     parser.add_argument('--max_iter', default=100, type=int,
                         help='maximum iteration')
     parser.add_argument('--h_tol', default=1e-8, type=float,
@@ -89,10 +97,10 @@ def get_args(debug):
                         help='progress rate')
     parser.add_argument('--rho_max', default=1e+16, type=float,
                         help='rho max')
-    parser.add_argument('--rho_rate', default=2, type=float,
+    parser.add_argument('--rho_rate', default=10, type=float,
                         help='rho rate')
     
-    parser.add_argument('--fig_show', default=True, type=bool)
+    parser.add_argument('--fig_show', default=False, type=bool)
 
     if debug:
         return parser.parse_args(args=[])
@@ -148,11 +156,16 @@ def loss_function(X, model, alpha, rho, config):
     return loss, loss_
 #%%
 def main():
-    config = vars(get_args(debug=True)) # default configuration
+    config = vars(get_args(debug=False)) # default configuration
     wandb.config.update(config)
 
-    '''simulate DAG and weighted adjacency matrix'''
+    config["cuda"] = torch.cuda.is_available()
     set_random_seed(config["seed"])
+    torch.manual_seed(config["seed"])
+    if config["cuda"]:
+        torch.cuda.manual_seed(config["seed"])
+    
+    '''simulate DAG and weighted adjacency matrix'''
     B_true = simulate_dag(config["d"], config["s0"], config["graph_type"])
 
     wandb.run.summary['W_true'] = wandb.Table(data=pd.DataFrame(B_true))
@@ -170,9 +183,13 @@ def main():
 
     '''optimization process'''
     X = torch.FloatTensor(X)
+    if config["cuda"]:
+        X.cuda()
 
     model = NotearsMLP(config["d"], 
-                       hidden_dims=[16, 1])
+                       hidden_dims=config["hidden_dim"] + [1])
+    if config["cuda"]:
+        model.cuda()
 
     # initial values
     rho = config["rho"]
@@ -254,9 +271,8 @@ def main():
 
     """accuracy"""
     acc = count_accuracy(B_true, B_est)
-    wandb.run.summary['acc'] = acc
+    wandb.log(acc)
     
-    wandb.run.summary['config'] = config
     wandb.run.finish()
 #%%
 if __name__ == '__main__':
