@@ -56,7 +56,7 @@ import argparse
 def get_args(debug):
     parser = argparse.ArgumentParser('parameters')
 
-    parser.add_argument('--seed', type=int, default=123, 
+    parser.add_argument('--seed', type=int, default=5, 
                         help='seed for repeatable results')
     parser.add_argument('--n', default=200, type=int,
                         help='the number of dataset')
