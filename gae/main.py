@@ -44,7 +44,7 @@ wandb.init(
 )
 #%%
 config = {
-    "seed": 7,
+    "seed": 3,
     'data_type': 'synthetic', # discrete, real
     "n": 5000,
     "d": 10,
@@ -99,6 +99,8 @@ def h_fun(W):
     h = trace_expm(W * W) - W.shape[0]
     return h
 #%%
+wandb.config.update(config)
+
 model = GAE(config)
 
 if config["cuda"]:
@@ -246,6 +248,5 @@ B_true = (W_true != 0).astype(float)
 acc = count_accuracy(B_true, B_est)
 wandb.log(acc)
 #%%
-wandb.config.update(config)
 wandb.run.finish()
 #%%

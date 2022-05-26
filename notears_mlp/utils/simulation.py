@@ -68,159 +68,81 @@ def simulate_dag(d, s0, graph_type):
     
     return B_perm
 #%%
-def simulate_parameter(B, w_ranges=((-2.0, -0.5), (0.5, 2.0))):
-    """simulate SEM parameters for a DAG
+def simulate_nonlinear_sem(B, n, noise_scale=None):
+    """Simulate samples from nonlinear SEM.
     Args:
-        B (np.ndarray): d x d binary adjacency matrix of DAG
-        w_ranges (tuple): disjoint weight ranges
-
+        B (np.ndarray): [d, d] binary adj matrix of DAG
+        n (int): num of samples
+        noise_scale (np.ndarray): scale parameter of additive noise, default all ones
+        
     Returns:
-        W (np.ndarray): d x d weighted adjacency matrix of DAG
+        X (np.ndarray): [n, d] sample matrix
     """
-    W = np.zeros(B.shape)
-    S = np.random.randint(len(w_ranges), size=B.shape)  # choice of range
-    for i, (low, high) in enumerate(w_ranges):
-        U = np.random.uniform(low=low, high=high, size=B.shape)
-        W += B * (S == i) * U
-    return W.round(2)
-#%%
-def simulate_linear_sem(W, n, sem_type, noise_scale=None, normalize=True):
-    """simulate samples from linear SEM with specified type of noise.
-    Args:
-        W (np.ndarray): d x d weighted adjacency matrix of DAG
-        n (int): number of samples, n = inf mimics population risk
-        sem_type (str): gauss, exp, gumbel, uniform, logistic, poisson
-        noise_scale (np.ndarray): scale parameter of addictive noise, default all ones
-        normalize (bool): If True, normalize simulated dataset
-
-    Returns:
-        X (np.ndarray): n x d sample matrix, 
-            if n == inf: d x d
-    """
-
-    def _simulate_single_equation(X, w, scale):
+    
+    def _simulate_single_equation(x, scale):
         """
-        X: n x num of parents
-        w: num of parents x 1
-        x: n x 1
+        input:
+            x: [n, num of parents]
+            scale: noise size
+        output:
+            x: [n]
         """
-        if sem_type == 'gauss':
-            z = np.random.normal(scale=scale, size=n)
-            x = X @ w + z
-        elif sem_type == 'exp':
-            z = np.random.exponential(scale=scale, size=n)
-            x = X @ w + z
-        elif sem_type == 'gumbel':
-            z = np.random.gumbel(scale=scale, size=n)
-            x = X @ w + z
-        elif sem_type == 'uniform':
-            z = np.random.uniform(low=-scale, high=scale, size=n)
-            x = X @ w + z
-        elif sem_type == 'logistic':
-            x = np.random.binomial(1, sigmoid(X @ w)) * 1.0
-        elif sem_type == 'poisson':
-            x = np.random.poisson(np.exp(X @ w)) * 1.0
+        
+        z = np.random.normal(scale=scale, size=n)
+        
+        parent_size = x.shape[1]
+        if parent_size == 0:
+            return z
+        
+        if sem_type == "mlp":
+            # sampling MLP weights
+            hidden = 100
+            weight_range = (0.5, 2.)
+            low, high = weight_range
+            W1 = np.random.uniform(low=low, high=high, size=[parent_size, hidden])
+            W1[np.random.rand()]
+        elif sem_type == "mim":
+            
+        # """FIXME"""
+        # elif sem_type == "gp":
+        # """FIXME"""
+        # elif sem_type == "gp-add":
+        
         else:
             raise ValueError('unknown sem type')
+        '''generate MLP weights'''
+        low, high = weight_range
+        for i, h_dim in enumerate(hidden_dims):
+            weight = torch.FloatTensor(x.shape[1], h_dim).uniform_(low, high)
+            weight[(np.random.rand(weight.shape[0], weight.shape[1]) < 0.5).nonzero()] *= -1 # determine sign
+            if i == 0:
+                bias = 0.
+            else:
+                bias = torch.FloatTensor(1, h_dim).uniform_(low, high)
+                bias[(np.random.rand(bias.shape[0], bias.shape[1]) < 0.5).nonzero()] *= -1 # determine sign
+            if activation == 'sigmoid':
+                x = torch.sigmoid(x @ weight + bias)
+            elif activation == 'relu':
+                x = torch.relu(x @ weight + bias)
+            elif activation == 'tanh':
+                x = torch.tanh(x @ weight + bias)
+            else:
+                raise ValueError('unknown activation')
+        weight = torch.FloatTensor(x.shape[1], 1).uniform_(low, high)
+        weight[(np.random.rand(weight.shape[0], weight.shape[1]) < 0.5).nonzero()] *= -1 # determine sign
+        x = x @ weight + z
         return x
     
-    d = W.shape[0]
-    
-    if noise_scale is None:
-        scale_vec = np.ones(d)
-    elif np.isscalar(noise_scale):
-        scale_vec = noise_scale * np.ones(d)
-    else:
-        if len(noise_scale) != d:
-            raise ValueError('noise scale must be a scalar or has length d')
-        scale_vec = noise_scale
-    
-    if not is_dag(W):
-        raise ValueError('W must be a DAG')
-    
-    '''?????'''
-    if np.isinf(n): # population risk for linear gauss SEM
-        if sem_type == 'gauss':
-            # make 1/d X @ X.T = true covariance matrix
-            X = np.sqrt(d) * np.diag(scale_vec) @ np.linalg.inv(np.eye(d) - W)
-            return X
-        else:
-            raise ValueError('population risk not available')
-    
-    # empirical risk
-    G = ig.Graph.Weighted_Adjacency(W.tolist())
+    d = B.shape[0]
+    scale_vec = noise_scale if noise_scale else np.ones(d)
+    X = np.zeros([n, d])
+    G = ig.Graph.Adjacency(B.tolist())
     ordered_vertices = G.topological_sorting()
     assert len(ordered_vertices) == d
-    
-    X = np.zeros((n, d))
     for j in ordered_vertices:
         parents = G.neighbors(j, mode=ig.IN)
-        X[:, j] = _simulate_single_equation(X[:, parents], W[parents, j], scale_vec[j])
-    
-    if normalize:
-        X = X - np.mean(X, axis=0, keepdims=True) # normalize
+        X[:, j] = _simulate_single_equation(X[:, parents], scale_vec[j]) 
     return X
-#%%
-# def simulate_nonlinear_sem(B, n, hidden_dims, activation='sigmoid', weight_range=(0.5, 2.), noise_scale=None):
-#     """Simulate samples from nonlinear SEM.
-#     Args:
-#         B (np.ndarray): [d, d] binary adj matrix of DAG
-#         n (int): num of samples
-#         hidden_dims (list of int): sizes of hidden dimensions in MLP
-#         activation (str): non-linear activation in MLP. Defaults to 'sigmoid'.
-#         weight_range (tuple): range of MLP weights values. Defaults to (0.5, 2.).
-#         noise_scale (np.ndarray): scale parameter of additive noise, default all ones
-        
-#     Returns:
-#         X (np.ndarray): [n, d] sample matrix
-#     """
-#     def _simulate_single_equation(x, scale):
-#         """
-#         input:
-#             X: [n, num of parents]
-#             scale: noise size
-#         output:
-#             x: [n]"""
-        
-#         z = torch.randn(size=(n, 1)) * scale
-        
-#         parent_size = x.shape[1]
-#         if parent_size == 0:
-#             return z
-        
-#         '''generate MLP weights'''
-#         low, high = weight_range
-#         for i, h_dim in enumerate(hidden_dims):
-#             weight = torch.FloatTensor(x.shape[1], h_dim).uniform_(low, high)
-#             weight[(np.random.rand(weight.shape[0], weight.shape[1]) < 0.5).nonzero()] *= -1 # determine sign
-#             if i == 0:
-#                 bias = 0.
-#             else:
-#                 bias = torch.FloatTensor(1, h_dim).uniform_(low, high)
-#                 bias[(np.random.rand(bias.shape[0], bias.shape[1]) < 0.5).nonzero()] *= -1 # determine sign
-#             if activation == 'sigmoid':
-#                 x = torch.sigmoid(x @ weight + bias)
-#             elif activation == 'relu':
-#                 x = torch.relu(x @ weight + bias)
-#             elif activation == 'tanh':
-#                 x = torch.tanh(x @ weight + bias)
-#             else:
-#                 raise ValueError('unknown activation')
-#         weight = torch.FloatTensor(x.shape[1], 1).uniform_(low, high)
-#         weight[(np.random.rand(weight.shape[0], weight.shape[1]) < 0.5).nonzero()] *= -1 # determine sign
-#         x = x @ weight + z
-#         return x
-    
-#     d = B.shape[0]
-#     scale_vec = noise_scale if noise_scale else np.ones(d)
-#     X = torch.zeros([n, d], requires_grad=False)
-#     G = ig.Graph.Adjacency(B.tolist())
-#     ordered_vertices = G.topological_sorting()
-#     assert len(ordered_vertices) == d
-#     for j in ordered_vertices:
-#         parents = G.neighbors(j, mode=ig.IN)
-#         X[:, [j]] = _simulate_single_equation(X[:, parents], scale_vec[j]) 
-#     return X
 #%%
 def count_accuracy(B_true, B_est):
     """Compute various accuracy metrics for B_est.

@@ -98,6 +98,8 @@ def h_fun(A, d):
     x = torch.eye(d).float() + torch.div(A * A, d) # alpha = 1 / d
     return torch.trace(torch.matrix_power(x, d)) - d
 #%%
+wandb.config.update(config)
+
 encoder = Encoder(config, adj_A, config["hidden"])
 decoder = Decoder(config, config["hidden"])
 
@@ -263,6 +265,5 @@ B_true = (W_true != 0).astype(float)
 acc = count_accuracy(B_true, B_est)
 wandb.log(acc)
 #%%
-wandb.config.update(config)
 wandb.run.finish()
 #%%
