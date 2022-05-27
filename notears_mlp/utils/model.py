@@ -22,7 +22,7 @@ class LocallyConnected(nn.Module):
         bias: [d, m2]
     """
     
-    def __init__(self, num_linear, input_features, output_features, bias=True):
+    def __init__(self, num_linear, input_features, output_features, bias=False):
         super(LocallyConnected, self).__init__()
         self.num_linear = num_linear
         self.input_features = input_features
