@@ -66,7 +66,7 @@ class LocallyConnected(nn.Module):
         )
 #%%
 class NotearsMLP(nn.Module):
-    def __init__(self, d, hidden_dims, bias=True):
+    def __init__(self, d, hidden_dims, bias=False):
         super(NotearsMLP, self).__init__()
         assert hidden_dims[-1] == 1
         self.d = d
