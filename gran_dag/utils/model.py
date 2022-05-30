@@ -64,10 +64,22 @@ class LocallyConnected(nn.Module):
         )
 #%%
 class GraNDAG(nn.Module):
+    """GraNDAG model
+    Args:
+        d: num of nodes
+        hidden_dim: hidden dimension of MLP
+        num_layers: num of layers
+        bias: whether to include bias or not
+    Shape:
+        - Input: [n, d]
+        - Output: [n, d]
+    """
+    
     def __init__(self, d, hidden_dim, num_layers, bias=False):
         super(GraNDAG, self).__init__()
         self.d = d
         self.hidden_dims = hidden_dim
+        self.num_layers = num_layers
         
         layers = []
         in_dim = d
@@ -99,6 +111,7 @@ class GraNDAG(nn.Module):
     
     @torch.no_grad()
     def get_adjacency(self):
+        """Get weighted adjacency matrix"""
         prod = self.mask # [d, d, d]
         for weight in self.MLP.parameters():
             if len(weight.shape) < 3: continue # bias
@@ -106,8 +119,26 @@ class GraNDAG(nn.Module):
             prod = torch.matmul(prod.unsqueeze(dim=2), w) # [d, d, 1, m2] = [d, d, 1, m1] @ [1, d, m1, m2]
             prod = prod.squeeze(dim=2)
         prod = torch.sum(prod, axis=-1) # [j, i]
-        W = prod.t() # adjacency matrix
+        W = prod.t() # adjacency matrix, [i, j]
         return W.cpu().detach().numpy()
+#%%
+def main():
+    n = 20
+    d = 10
+    hidden_dim = 8
+    num_layers = 3
+    
+    model = GraNDAG(d, hidden_dim, num_layers)
+    
+    x = torch.rand(n, d)
+    recon = model(x)
+    assert recon.shape == (n, d)
+    assert model.mask.shape == (d, d, d)
+    assert model.get_adjacency().shape == (d, d)
+    print('model test pass!')
+#%%
+if __name__ == "__main__":
+    main()
 #%%
 # d = config["d"]
 # hidden_dim = config["hidden_dim"]
