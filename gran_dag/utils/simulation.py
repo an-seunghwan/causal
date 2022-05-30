@@ -1,5 +1,8 @@
 #%%
 import torch
+from torch.utils.data.dataset import TensorDataset
+from torch.utils.data import DataLoader
+
 import numpy as np
 import random
 import igraph as ig
@@ -68,7 +71,7 @@ def simulate_dag(d, s0, graph_type):
     
     return B_perm
 #%%
-def simulate_nonlinear_sem(B, n, sem_type, noise_scale=None):
+def simulate_nonlinear_sem(B, n, sem_type, batch_size, noise_scale=None):
     """Simulate samples from nonlinear SEM.
     Args:
         B (np.ndarray): [d, d] binary adj matrix of DAG
@@ -122,7 +125,7 @@ def simulate_nonlinear_sem(B, n, sem_type, noise_scale=None):
             from sklearn.gaussian_process import GaussianProcessRegressor
             gp = GaussianProcessRegressor()
             x = sum([gp.sample_y(x[:, i, None], random_state=None).flatten()
-                     for i in range(X.shape[1])]) + z
+                     for i in range(x.shape[1])]) + z
         else:
             raise ValueError('unknown sem type')
         return x
@@ -136,7 +139,11 @@ def simulate_nonlinear_sem(B, n, sem_type, noise_scale=None):
     for j in ordered_vertices:
         parents = G.neighbors(j, mode=ig.IN)
         X[:, j] = _simulate_single_equation(X[:, parents], scale_vec[j]) 
-    return X
+    
+    X = torch.FloatTensor(X)
+    data = TensorDataset(X)
+    data_loader = DataLoader(data, batch_size=batch_size)
+    return data_loader
 #%%
 def count_accuracy(B_true, B_est):
     """Compute various accuracy metrics for B_est.
