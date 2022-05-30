@@ -48,9 +48,9 @@ def get_args(debug):
                         help='seed for repeatable results')
     parser.add_argument('--n', default=1000, type=int,
                         help='the number of dataset')
-    parser.add_argument('--d', default=5, type=int,
+    parser.add_argument('--d', default=10, type=int,
                         help='the number of nodes')
-    parser.add_argument('--s0', default=8, type=int,
+    parser.add_argument('--s0', default=15, type=int,
                         help='expected number of edges')
     parser.add_argument('--graph_type', type=str, default='ER',
                         help='graph type: ER, SF, BP')
@@ -80,7 +80,7 @@ def get_args(debug):
                         help='progress rate')
     parser.add_argument('--rho_max', default=1e+16, type=float,
                         help='rho max')
-    parser.add_argument('--rho_rate', default=2, type=float,
+    parser.add_argument('--rho_rate', default=10, type=float,
                         help='rho rate')
 
     if debug:
@@ -184,7 +184,7 @@ def main():
             'aug': [],
         }
         
-        # primal update
+        """primal update"""
         h_old = np.inf
         while rho < config["rho_max"]:
             while True:
@@ -193,9 +193,9 @@ def main():
                 loss.backward()
                 optimizer.step()
                 
+                """stopping rule: no change in weight estimation (convergence)"""
                 with torch.no_grad():
                     h_new = h_fun(W_est).item()
-                # no change in weight estimation (convergence)
                 if abs(h_old - h_new) < 1e-8: 
                     break
                 h_old = h_new
@@ -211,7 +211,7 @@ def main():
             else:
                 break
         
-        # dual ascent step
+        """dual ascent step"""
         h = h_new
         alpha += rho * h
         
