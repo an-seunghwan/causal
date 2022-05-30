@@ -1,10 +1,9 @@
 #%%
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import numpy as np
 import math
-
-from utils.trac_exp import trace_expm
 #%%
 class LocallyConnected(nn.Module):
     """Local linear layer (applied to each node(variable))
@@ -114,29 +113,48 @@ class NotearsMLP(nn.Module):
         W = torch.sqrt(W)
         return W.cpu().detach().numpy()
 #%%
-# local = LocallyConnected(10, 2, 4)
-# local
-# #%%
-# d = 10
-# bias = True
-# hidden_dims = [16, 32, 64, 1]
-# assert hidden_dims[-1] == 1
-# fc1 = nn.Linear(d, d * hidden_dims[0], bias=bias)
-# layers = []
-# for i in range(len(hidden_dims)-1):
-#     layers.append(LocallyConnected(d, hidden_dims[i], hidden_dims[i+1], bias=bias))
-# fc2 = nn.ModuleList(layers)
-# #%%
-# input = torch.rand(n, d)
-# h = fc1(input)
-# h = h.reshape(-1, d, hidden_dims[0])
-# for layer in fc2:
-#     h = torch.sigmoid(h)
-#     h = layer(h)
-# h.squeeze(dim=2)
-# #%%
-# W = fc1.weight
-# W = W.view(d, -1, d) # [i, hidden, k]
-# W = torch.sum(W * W, axis=1) # [j, k]
-# W = W.t() # [k, j]
+d = config["d"]
+hidden_dim = config["hidden_dim"]
+num_layers = config["num_layers"]
+
+batch.shape
+
+"""without bias"""
+bias = True
+layers = []
+in_dim = d
+out_dim = hidden_dim
+for i in range(num_layers):
+    if i == num_layers - 1:
+        out_dim = 1 # dimension of each node == 1
+    layers.append(LocallyConnected(d, in_dim, out_dim, bias=bias))
+    if i == 0:
+        in_dim = hidden_dim
+MLP = nn.ModuleList(layers)
+#%%
+"""masking layer"""
+mask = torch.ones(d, d) - torch.eye(d)
+mask = torch.stack([torch.diag(mask[i]) for i in range(d)], dim=0)
+
+x = batch.unsqueeze(dim=1) 
+h = x.repeat((1, d, 1)) # [n, d, d], m1 = d
+h = torch.matmul(h.unsqueeze(dim=2), mask.unsqueeze(dim=0)) # [n, d, 1, d] = [n, d, 1, d] @ [1, d, d, d]
+h = h.squeeze(dim=2)
+h.shape
+
+for i, layer in enumerate(MLP):
+    h = layer(h)
+    if i != config["num_layers"] - 1:
+        h = F.leaky_relu(h)
+h = h.squeeze(dim=2)
+h.shape
+#%%
+prod = mask # [d, d, d]
+for weight in MLP.parameters():
+    if len(weight.shape) < 3: continue # bias
+    w = torch.abs(weight.unsqueeze(dim=0))
+    prod = torch.matmul(prod.unsqueeze(dim=2), w) # [d, d, 1, m2] = [d, d, 1, m1] @ [1, d, m1, m2]
+    prod = prod.squeeze(dim=2)
+prod = torch.sum(prod, axis=-1) # [j, i]
+prod.t() # adjacency matrix
 #%%

@@ -70,7 +70,9 @@ def get_args(debug):
     parser.add_argument('--h', default=np.inf, type=float,
                         help='h')
     
-    parser.add_argument("--hidden_dim", default=[10], type=arg_as_list,
+    parser.add_argument("--num_layers", default=3, type=int,
+                        help="hidden dimensions for MLP")
+    parser.add_argument("--hidden_dim", default=8, type=int,
                         help="hidden dimensions for MLP")
     
     parser.add_argument('--epochs', default=300, type=float,
