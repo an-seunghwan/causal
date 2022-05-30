@@ -1,9 +1,9 @@
 project: causal
-program: linear.py
+program: main.py
 method: grid
 metric:
   goal: minimize
-  name: train/loss
+  name: loss
 parameters:
   s0:
     values: [5, 8, 10]

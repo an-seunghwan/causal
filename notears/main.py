@@ -23,11 +23,28 @@ from utils.viz import (
 
 from utils.trac_exp import trace_expm
 #%%
+import sys
+import subprocess
+try:
+    import wandb
+except:
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "wandb"])
+    with open("../wandb_api.txt", "r") as f:
+        key = f.readlines()
+    subprocess.run(["wandb", "login"], input=key[0], encoding='utf-8')
+    import wandb
+
+wandb.init(
+    project="(causal)NOTEARS", 
+    entity="anseunghwan",
+    tags=["linear"],
+)
+#%%
 import argparse
-def get_args():
+def get_args(debug):
     parser = argparse.ArgumentParser('parameters')
 
-    parser.add_argument('--seed', type=int, default=10, 
+    parser.add_argument('--seed', type=int, default=1, 
                         help='seed for repeatable results')
     parser.add_argument('--n', default=1000, type=int,
                         help='the number of dataset')
@@ -66,7 +83,10 @@ def get_args():
     parser.add_argument('--rho_rate', default=2, type=float,
                         help='rho rate')
 
-    return parser.parse_args()
+    if debug:
+        return parser.parse_args(args=[])
+    else:    
+        return parser.parse_args()
 
 # config = {
 #     "seed": 10,
@@ -91,24 +111,6 @@ def get_args():
 #     "rho_rate": 2.,
 # }
 #%%
-import sys
-import subprocess
-try:
-    import wandb
-except:
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "wandb"])
-    with open("../wandb_api.txt", "r") as f:
-        key = f.readlines()
-    subprocess.run(["wandb", "login"], input=key[0], encoding='utf-8')
-    import wandb
-
-wandb.init(
-    project="(causal)NOTEARS", 
-    entity="anseunghwan",
-    tags=["notears", "linear"],
-    # name='notears'
-)
-#%%
 def h_fun(W):
     """Evaluate DAGness constraint"""
     h = trace_expm(W * W) - W.shape[0]
@@ -116,16 +118,27 @@ def h_fun(W):
 
 def loss_function(X, W_est, alpha, rho, config):
     """Evaluate value and gradient of augmented Lagrangian."""
+    loss_ = []
+    
     R = X - X.matmul(W_est)
-    loss = 0.5 / config["n"] * (R ** 2).sum() + config["lambda"] * torch.norm(W_est, p=1)
+    recon = 0.5 / config["n"] * (R ** 2).sum()
+    loss_.append(('recon', recon))
+    
+    L1 = config["lambda"] * torch.norm(W_est, p=1)
+    loss_.append(('L1', L1))
     
     h = h_fun(W_est)
-    loss += (0.5 * rho * (h ** 2))
-    loss += (alpha * h)
-    return loss
+    aug = 0.5 * rho * (h ** 2)
+    aug += alpha * h
+    loss_.append(('aug', aug))
+        
+    loss = sum([y for _, y in loss_])
+    loss_.append(('loss', loss))
+    
+    return loss, loss_
 #%%
 def main():
-    config = vars(get_args()) # default configuration
+    config = vars(get_args(debug=True)) # default configuration
     wandb.config.update(config)
 
     '''simulate DAG and weighted adjacency matrix'''
@@ -162,70 +175,59 @@ def main():
     optimizer = torch.optim.Adam([W_est], lr=config["lr"])
 
     for iteration in range(config["max_iter"]):
+        """Perform one step of dual ascent in augmented Lagrangian."""
+        
+        logs = {
+            'loss': [], 
+            'recon': [],
+            'L1': [],
+            'aug': [],
+        }
+        
         # primal update
-        count = 0
         h_old = np.inf
-        while True:
-            optimizer.zero_grad()
-            loss = loss_function(X, W_est, alpha, rho, config)
-            loss.backward()
-            optimizer.step()
-            
-            h_new = h_fun(W_est).item()
-            # no change in weight estimation (convergence)
-            if abs(h_old - h_new) < 1e-8: 
-                break
-            h_old = h_new
+        while rho < config["rho_max"]:
+            while True:
+                optimizer.zero_grad()
+                loss, loss_ = loss_function(X, W_est, alpha, rho, config)
+                loss.backward()
+                optimizer.step()
                 
-            count += 1
-            """update log"""
-            wandb.log(
-                {
-                    # "inner_step": count,
-                    "inner_loop/h": h_new,
-                    "inner_loop/loss": loss.item()
-                }
-            )
+                with torch.no_grad():
+                    h_new = h_fun(W_est).item()
+                # no change in weight estimation (convergence)
+                if abs(h_old - h_new) < 1e-8: 
+                    break
+                h_old = h_new
         
-        # dual ascent step
-        alpha += rho * h_new
-        
-        # stopping rules
-        if h_new <= config["h_tol"]:
-            # update
-            h = h_new
-            """update log"""
-            wandb.log(
-                {
-                    # "iteration": iteration,
-                    "train/h": h,
-                    "train/rho": rho,
-                    "train/alpha": alpha,
-                    "train/loss": loss.item()
-                }
-            )
-            break
-        else:
-            """update log"""
-            wandb.log(
-                {
-                    # "iteration": iteration,
-                    "train/h": h_new,
-                    "train/rho": rho,
-                    "train/alpha": alpha,
-                    "train/loss": loss.item()
-                }
-            )
+            """accumulate losses"""
+            for x, y in loss_:
+                logs[x] = logs.get(x) + [y.item()]
+            
+            with torch.no_grad():
+                h_new = h_fun(W_est).item()
             if h_new > config["progress_rate"] * h:
                 rho *= config["rho_rate"]
-                if rho >= config["rho_max"]:
-                    break
-            # update
-            h = h_new
+            else:
+                break
         
-        print('[iteration {:03d}]: loss: {:.4f}, h(W): {:.4f}, primal update: {:04d}'.format(
-            iteration, loss.item(), h, count))
-
+        # dual ascent step
+        h = h_new
+        alpha += rho * h
+        
+        print_input = "[iteration {:03d}]".format(iteration)
+        print_input += ''.join([', {}: {:.4f}'.format(x, np.mean(y).round(2)) for x, y in logs.items()])
+        print_input += ', h(W): {:.8f}'.format(h)
+        print(print_input)
+        
+        """update log"""
+        wandb.log({x : np.mean(y) for x, y in logs.items()})
+        wandb.log({'h(W)' : h})
+        
+        """stopping rule"""
+        if h <= config["h_tol"] or rho >= config["rho_max"]:
+            break
+        
     """chech DAGness of estimated weighted graph"""
     W_est = W_est.detach().numpy().astype(float).round(2)
     W_est[np.abs(W_est) < config["w_threshold"]] = 0.
@@ -252,9 +254,8 @@ def main():
     """accuracy"""
     B_est = (W_est != 0).astype(float)
     acc = count_accuracy(B_true, B_est)
-    wandb.run.summary['acc'] = acc
+    wandb.log(acc)
     
-    wandb.run.summary['config'] = config
     wandb.run.finish()
 #%%
 if __name__ == '__main__':
