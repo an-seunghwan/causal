@@ -16,10 +16,16 @@ from utils.simulation import (
     count_accuracy,
 )
 
+from utils.model import (
+    GraNDAG
+)
+
 from utils.viz import (
     viz_graph,
     viz_heatmap,
 )
+
+from utils.trac_exp import trace_expm
 #%%
 import sys
 import subprocess
@@ -63,7 +69,7 @@ def get_args(debug):
     parser.add_argument('--sem_type', type=str, default='gp-add',
                         help='sem type: mlp, mim, gp, gp-add')
 
-    parser.add_argument('--rho', default=1, type=float,
+    parser.add_argument('--rho', default=1e-3, type=float,
                         help='rho')
     parser.add_argument('--alpha', default=0, type=float,
                         help='alpha')
@@ -75,28 +81,24 @@ def get_args(debug):
     parser.add_argument("--hidden_dim", default=8, type=int,
                         help="hidden dimensions for MLP")
     
-    parser.add_argument('--epochs', default=300, type=float,
-                        help='learning rate')
     parser.add_argument('--batch_size', default=64, type=float,
                         help='learning rate')
     parser.add_argument('--lr', default=0.001, type=float,
                         help='learning rate')
-    parser.add_argument('--max_iter', default=100, type=int,
+    parser.add_argument('--train_iter', default=1000, type=int,
                         help='maximum iteration')
     parser.add_argument('--h_tol', default=1e-8, type=float,
                         help='h value tolerance')
     parser.add_argument('--w_threshold', default=0.3, type=float,
                         help='weight adjacency matrix threshold')
-    parser.add_argument('--lambda1', default=0.01, type=float,
-                        help='weight of LASSO regularization')
-    parser.add_argument('--lambda2', default=0.01, type=float,
-                        help='weight of Ridge regularization')
-    parser.add_argument('--progress_rate', default=0.25, type=float,
+    parser.add_argument('--progress_rate', default=0.9, type=float,
                         help='progress rate')
-    parser.add_argument('--rho_max', default=1e+16, type=float,
-                        help='rho max')
     parser.add_argument('--rho_rate', default=10, type=float,
                         help='rho rate')
+    
+    parser.add_argument('--edge-clamp-range', type=float, default=1e-4,
+                        help='as we train, clamping the edges (i,j) to zero when prod_ij is that close to zero. '
+                             '0 means no clamping. Uses masks on inputs. Once an edge is clamped, no way back.')
     
     parser.add_argument('--fig_show', default=True, type=bool)
 
@@ -128,24 +130,24 @@ def get_args(debug):
 #     "rho_rate": 2.,
 # }
 #%%
-def loss_function(X, model, alpha, rho, config):
+def h_fun(W):
+    """Evaluate DAGness constraint"""
+    h = trace_expm(W * W) - W.shape[0]
+    return h
+
+def loss_function(batch, model, alpha, rho, config):
     """Evaluate value and gradient of augmented Lagrangian."""
     loss_ = []
     
-    xhat = model(X)
-    recon = 0.5 / config["n"] * torch.sum((xhat - X) ** 2) 
+    xhat = model(batch)
+    W = model.get_adjacency()
+    
+    recon = 0.5 / config["n"] * torch.sum((xhat - batch) ** 2) 
     loss_.append(('recon', recon))
     
-    L1 = config["lambda1"] * model.l1_reg()
-    loss_.append(('L1', L1))
-    
-    L2 = config["lambda2"] * model.l2_reg()
-    loss_.append(('L2', L2))
-    
-    h = model.h_func()
+    h = h_fun(W)
     aug = (0.5 * rho * (h ** 2))
     aug += (alpha * h)
-    
     loss_.append(('aug', aug))
         
     loss = sum([y for _, y in loss_])
@@ -179,17 +181,15 @@ def main():
         config["sem_type"], 
         config["batch_size"]
     )
+    train_loader = iter(data_loader)
     
     if config["cuda"]:
         data_loader.cuda()
 
-    for [batch] in data_loader:
-        break
-    print(batch.shape)
-    
     '''optimization process'''
-    model = NotearsMLP(config["d"], 
-                       hidden_dims=config["hidden_dim"] + [1])
+    model = GraNDAG(d=config["d"], 
+                    hidden_dim=config["hidden_dim"],
+                    num_layers=config["num_layers"])
     if config["cuda"]:
         model.cuda()
 
@@ -198,61 +198,67 @@ def main():
     alpha = config["alpha"]
     h = config["h"]
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=config["lr"])
+    optimizer = torch.optim.RMSprop(model.parameters(), lr=config["lr"])
 
-    for iteration in range(config["max_iter"]):
-        """Perform one step of dual ascent in augmented Lagrangian."""
-        
+    for iteration in range(config["train_iter"]):
         logs = {
             'loss': [], 
             'recon': [],
-            'L1': [],
-            'L2': [],
             'aug': [],
         }
         
-        """primal update"""
-        # h_old = np.inf
-        while rho < config["rho_max"]:
-            for epoch in tqdm.tqdm(range(config["epochs"]), desc="primal update"):
-                optimizer.zero_grad()
-                loss, loss_ = loss_function(X, model, alpha, rho, config)
-                loss.backward()
-                optimizer.step()
-            
-            """accumulate losses"""
-            for x, y in loss_:
-                logs[x] = logs.get(x) + [y.item()]
-            
+        try:
+            [batch] = next(train_loader)
+        except:
+            train_loader = iter(data_loader)
+            [batch] = next(train_loader)
+
+        """optimization step on augmented lagrangian"""
+        optimizer.zero_grad()
+        loss, loss_ = loss_function(batch, model, alpha, rho, config)
+        loss.backward()
+        optimizer.step()
+        
+        """accumulate losses"""
+        for x, y in loss_:
+            logs[x] = logs.get(x) + [y.item()]
+        
+        """clamp edges"""
+        if config["edge_clamp_range"] != 0:
             with torch.no_grad():
-                h_new = model.h_func().item()
-            if h_new > config["progress_rate"] * h:
-                rho *= config["rho_rate"]
-            else:
-                break
-            
-            # # no change in weight estimation (convergence)
-            # if abs(h_old - h_new) < 1e-8: 
-            #     break
-            # h_old = h_new
-                
-        """dual ascent step"""
-        h = h_new
-        alpha += rho * h
+                to_keep = (model.get_adjacency() > config["edge_clamp_range"]).type(torch.Tensor)
+                model.mask *= torch.stack([torch.diag(to_keep[:, i]) for i in range(config["d"])], dim=0)
+        
+        with torch.no_grad():
+            h_new = h_fun(model.get_adjacency()).item()
         
         print_input = "[iteration {:03d}]".format(iteration)
-        print_input += ''.join([', {}: {:.4f}'.format(x, np.mean(y).round(2)) for x, y in logs.items()])
-        print_input += ', h(W): {:.8f}'.format(h)
+        print_input += ''.join([', {}: {:.4f}'.format(x, round(y[0], 2)) for x, y in logs.items()])
+        print_input += ', h(W): {:.8f}'.format(h_new)
         print(print_input)
         
         """update log"""
         wandb.log({x : np.mean(y) for x, y in logs.items()})
-        wandb.log({'h(W)' : h})
+        wandb.log({'h(W)' : h_new})
         
         """stopping rule"""
-        if h <= config["h_tol"] or rho >= config["rho_max"]:
+        if h_new > config["h_tol"]:
+            """dual ascent step"""
+            alpha += rho * h_new
+            
+            """Did the contraint improve sufficiently?"""
+            if h_new > config["progress_rate"] * h:
+                rho *= config["rho_rate"]
+        else:
             break
         
+        h = h_new
+        
+    """Final clamping of all edges"""
+    with torch.no_grad():
+        to_keep = (model.get_adjacency() > 0).type(torch.Tensor)
+        model.mask *= torch.stack([torch.diag(to_keep[:, i]) for i in range(config["d"])], dim=0)
+    
     """chech DAGness of estimated weighted graph"""
     W_est = model.get_adjacency().astype(float).round(2)
     W_est[np.abs(W_est) < config["w_threshold"]] = 0.

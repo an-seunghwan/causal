@@ -94,7 +94,7 @@ class GraNDAG(nn.Module):
         
         """masking layer"""
         mask = torch.ones(d, d) - torch.eye(d)
-        self.mask = torch.stack([torch.diag(mask[i]) for i in range(d)], dim=0)
+        self.mask = torch.stack([torch.diag(mask[:, i]) for i in range(d)], dim=0)
     
     def forward(self, x):
         x = x.unsqueeze(dim=1) 
@@ -109,7 +109,6 @@ class GraNDAG(nn.Module):
         h = h.squeeze(dim=2)
         return h
     
-    @torch.no_grad()
     def get_adjacency(self):
         """Get weighted adjacency matrix"""
         prod = self.mask # [d, d, d]
@@ -120,7 +119,7 @@ class GraNDAG(nn.Module):
             prod = prod.squeeze(dim=2)
         prod = torch.sum(prod, axis=-1) # [j, i]
         W = prod.t() # adjacency matrix, [i, j]
-        return W.cpu().detach().numpy()
+        return W
 #%%
 def main():
     n = 20
