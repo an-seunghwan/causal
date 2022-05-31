@@ -33,14 +33,18 @@ B = _random_permutation(B)
 ig.Graph.Adjacency(B.tolist()).is_dag() # check DAGness
 #%%
 '''weighted adj matrix of DAG'''
-w_ranges=((-2.0, -0.5), (0.5, 2.0))
+# w_ranges=((-2.0, -0.5), (0.5, 2.0))
+w_ranges=(-1, 1)
 
 W = np.zeros(B.shape)
 S = np.random.randint(len(w_ranges), size=B.shape)  # which range
-for i, (low, high) in enumerate(w_ranges):
-    U = np.random.uniform(low=low, high=high, size=B.shape)
+# for i, (low, high) in enumerate(w_ranges):
+for i, val in enumerate(w_ranges):
+    # U = np.random.uniform(low=low, high=high, size=B.shape)
+    U = np.ones(B.shape) * val
     W += B * (S == i) * U
-W = np.round(W, 2)
+# W = np.round(W, 2)
+W = W.astype(int)
 np.savetxt('./assets/W_example.csv', W, delimiter=',')
 #%%
 '''visualize weighted adj matrix of DAG'''
@@ -70,7 +74,8 @@ plt.close()
 #%%
 '''heatmap'''
 fig = plt.figure(figsize=(5, 4))
-plt.pcolor(W, cmap='coolwarm')
+plt.pcolor(W, cmap='coolwarm', edgecolor='black')
+plt.gca().invert_yaxis()
 plt.colorbar()
 plt.savefig(
     "./assets/DAG_example_heatmap.png",
