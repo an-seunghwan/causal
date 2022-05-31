@@ -9,7 +9,7 @@ def set_random_seed(seed):
     random.seed(seed)
     np.random.seed(seed)
 
-set_random_seed(10)
+set_random_seed(5)
 #%%
 '''binary adj matrix of DAG'''
 n, d, s0, graph_type = 100, 5, 5, 'ER'
@@ -46,7 +46,7 @@ np.savetxt('./assets/W_example.csv', W, delimiter=',')
 '''visualize weighted adj matrix of DAG'''
 plt.figure(figsize=(6, 6))
 G = nx.from_numpy_matrix(W, create_using=nx.DiGraph)
-layout = nx.circular_layout(G)
+layout = nx.planar_layout(G)
 labels = nx.get_edge_attributes(G, 'weight')
 nx.draw(G, layout, 
         with_labels=True, 
@@ -61,6 +61,19 @@ nx.draw_networkx_edge_labels(G,
                              font_size=15)
 plt.savefig(
     "./assets/DAG_example.png",
+    dpi=100,
+    bbox_inches="tight",
+    pad_inches=0.1,
+)
+plt.show()
+plt.close()
+#%%
+'''heatmap'''
+fig = plt.figure(figsize=(5, 4))
+plt.pcolor(W, cmap='coolwarm')
+plt.colorbar()
+plt.savefig(
+    "./assets/DAG_example_heatmap.png",
     dpi=100,
     bbox_inches="tight",
     pad_inches=0.1,
