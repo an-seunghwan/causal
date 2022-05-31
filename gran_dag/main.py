@@ -116,7 +116,7 @@ def get_args(debug):
                         help='as we train, clamping the edges (i,j) to zero when prod_ij is that close to zero. '
                             '0 means no clamping. Uses masks on inputs. Once an edge is clamped, no way back.')
     
-    parser.add_argument('--fig_show', default=True, type=bool)
+    parser.add_argument('--fig_show', default=False, type=bool)
 
     if debug:
         return parser.parse_args(args=[])
@@ -180,7 +180,7 @@ def is_dag(W):
     return True
 #%%
 def main():
-    config = vars(get_args(debug=True)) # default configuration
+    config = vars(get_args(debug=False)) # default configuration
     wandb.config.update(config)
 
     config["cuda"] = torch.cuda.is_available()
@@ -236,6 +236,7 @@ def main():
         model.mask.copy_(torch.Tensor(model_mask))
 
     """optimization process"""
+    print("optimization process...\n")
     model.train()
     optimizer = torch.optim.RMSprop(model.parameters(), lr=config["lr"])
     
@@ -304,6 +305,7 @@ def main():
         model.mask *= to_keep
     
     """to DAG"""
+    print("to DAG...\n")
     model.eval()
     if config["jacobian"]:
         jac_avg = torch.zeros(config["d"], config["d"])
@@ -331,6 +333,7 @@ def main():
     # """CAM pruning"""
     
     """retrain"""
+    print("retrain...\n")
     model.train()
     optimizer = torch.optim.RMSprop(model.parameters(), lr=config["lr"])
     
