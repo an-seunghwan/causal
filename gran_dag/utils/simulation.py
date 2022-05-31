@@ -71,12 +71,13 @@ def simulate_dag(d, s0, graph_type):
     
     return B_perm
 #%%
-def simulate_nonlinear_sem(B, n, sem_type, batch_size, noise_scale=None):
+def simulate_nonlinear_sem(B, n, sem_type, batch_size, normalize, noise_scale=None):
     """Simulate samples from nonlinear SEM.
     Args:
         B (np.ndarray): [d, d] binary adj matrix of DAG
         n (int): num of samples
         sem_type (str): mlp, mim, gp, gp-add
+        normalize (bool): if true, normalize dataset
         noise_scale (np.ndarray): scale parameter of additive noise, default all ones
         
     Returns:
@@ -140,10 +141,12 @@ def simulate_nonlinear_sem(B, n, sem_type, batch_size, noise_scale=None):
         parents = G.neighbors(j, mode=ig.IN)
         X[:, j] = _simulate_single_equation(X[:, parents], scale_vec[j]) 
     
+    if normalize:
+        X = X - np.mean(X, axis=0, keepdims=True) # normalize
     X = torch.FloatTensor(X)
     data = TensorDataset(X)
     data_loader = DataLoader(data, batch_size=batch_size)
-    return data_loader
+    return data_loader, X
 #%%
 def count_accuracy(B_true, B_est):
     """Compute various accuracy metrics for B_est.

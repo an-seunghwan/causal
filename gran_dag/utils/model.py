@@ -23,18 +23,21 @@ class GraNDAG(nn.Module):
         self.num_layers = num_layers
         self.num_params = num_params
         
-        """without bias"""
-        self.weights = []
+        """MLP weights = output is Gaussian mean vector (without bias)"""
+        weights = []
         for i in range(num_layers):
             in_dim = out_dim = hidden_dim
             if i == 0:
                 in_dim = d
             if i == num_layers - 1:
                 out_dim = num_params
-            self.weights.append(nn.Parameter(torch.Tensor(d,
+            weights.append(nn.Parameter(torch.Tensor(d,
                                                         out_dim,
                                                         in_dim)))
-
+        self.weights = nn.ParameterList(weights)
+        
+        self.logvar = nn.Parameter(torch.zeros(d, ))
+        
         """masking layer"""
         self.mask = torch.ones(d, d) - torch.eye(d)
         
@@ -104,6 +107,7 @@ def main():
     assert recon.shape == (n, d)
     assert model.mask.shape == (d, d)
     assert model.get_adjacency().shape == (d, d)
+    assert model.logvar.shape == (d, )
     print('model test pass!')
 #%%
 if __name__ == "__main__":

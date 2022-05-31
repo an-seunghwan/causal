@@ -7,9 +7,13 @@ import pandas as pd
 import tqdm
 
 import torch
+from sklearn.ensemble import ExtraTreesRegressor
+from sklearn.feature_selection import SelectFromModel
+# import cdt
+# from cdt.utils.R import RPackages, launch_R_script
 
 from utils.simulation import (
-    is_dag,
+    # is_dag,
     set_random_seed,
     simulate_dag,
     simulate_nonlinear_sem,
@@ -67,6 +71,8 @@ def get_args(debug):
                         help='graph type: ER, SF, BP')
     parser.add_argument('--sem_type', type=str, default='gp-add',
                         help='sem type: mlp, mim, gp, gp-add')
+    parser.add_argument('--normalize_data', type=bool, default=True,
+                        help='normalize dataset')
 
     parser.add_argument('--rho', default=1e-3, type=float,
                         help='rho')
@@ -84,20 +90,31 @@ def get_args(debug):
                         help='learning rate')
     parser.add_argument('--lr', default=0.001, type=float,
                         help='learning rate')
-    parser.add_argument('--train_iter', default=1000, type=int,
+    parser.add_argument('--train_iter', default=100, type=int,
                         help='maximum iteration')
     parser.add_argument('--h_tol', default=1e-8, type=float,
                         help='h value tolerance')
-    parser.add_argument('--w_threshold', default=0.3, type=float,
-                        help='weight adjacency matrix threshold')
+    # parser.add_argument('--w_threshold', default=0.3, type=float,
+    #                     help='weight adjacency matrix threshold')
     parser.add_argument('--progress_rate', default=0.9, type=float,
                         help='progress rate')
     parser.add_argument('--rho_rate', default=10, type=float,
                         help='rho rate')
     
-    parser.add_argument('--edge-clamp-range', type=float, default=1e-4,
+    parser.add_argument('--normalize_W', type=str, default='path',
+                        help='normalize weighed adjacency matrix, "none" does not normalize')
+    parser.add_argument('--square_W', type=bool, default=False,
+                        help='if True, connectivity matrix is computed with absolute, otherwise, with square')
+    parser.add_argument('--jacobian', type=bool, default=True,
+                        help='use Jacobian in thresholding')
+    
+    parser.add_argument('--pns_threshold', type=float, default=1e-4,
+                        help='threshold in PNS')
+    parser.add_argument('--num_neighbors', type=int, default=None,
+                        help='number of neighbors to select in PNS')
+    parser.add_argument('--edge_clamp_range', type=float, default=1e-4,
                         help='as we train, clamping the edges (i,j) to zero when prod_ij is that close to zero. '
-                             '0 means no clamping. Uses masks on inputs. Once an edge is clamped, no way back.')
+                            '0 means no clamping. Uses masks on inputs. Once an edge is clamped, no way back.')
     
     parser.add_argument('--fig_show', default=True, type=bool)
 
@@ -139,10 +156,11 @@ def loss_function(batch, model, alpha, rho, config):
     loss_ = []
     
     xhat = model(batch)
-    W = model.get_adjacency()
+    W = model.get_adjacency(norm=config["normalize_W"], square=config["square_W"])
     
-    recon = 0.5 / config["n"] * torch.sum((xhat - batch) ** 2) 
-    loss_.append(('recon', recon))
+    nll = 0.5 * (model.logvar + torch.pow(xhat - batch, 2) / torch.max(torch.exp(model.logvar), torch.tensor(1e-8)))
+    nll = torch.mean(torch.sum(nll, axis=1))
+    loss_.append(('nll', nll))
     
     h = h_fun(W)
     aug = (0.5 * rho * (h ** 2))
@@ -153,6 +171,13 @@ def loss_function(batch, model, alpha, rho, config):
     loss_.append(('loss', loss))
     
     return loss, loss_
+#%%
+def is_dag(W):
+    prod = np.eye(W.shape[0])
+    for _ in range(W.shape[0]):
+        prod = np.matmul(W, prod)
+        if np.trace(prod) != 0: return False
+    return True
 #%%
 def main():
     config = vars(get_args(debug=True)) # default configuration
@@ -174,35 +199,55 @@ def main():
     wandb.log({'heatmap': wandb.Image(fig)})
 
     '''simulate dataset'''
-    data_loader = simulate_nonlinear_sem(
+    data_loader, X = simulate_nonlinear_sem(
         B_true, 
         config["n"], 
         config["sem_type"], 
-        config["batch_size"]
+        config["batch_size"],
+        config["normalize_data"]
     )
     train_loader = iter(data_loader)
     
     if config["cuda"]:
         data_loader.cuda()
 
-    '''optimization process'''
     model = GraNDAG(d=config["d"], 
                     hidden_dim=config["hidden_dim"],
                     num_layers=config["num_layers"])
     if config["cuda"]:
         model.cuda()
+        
+    """Preliminary Neighborhood Selection"""
+    print("Preliminary Neighborhood Selection...\n")
+    x = X.detach().numpy().copy()
+    model_mask = model.mask.detach().cpu().numpy()
+    for node in range(config["d"]):
+        x_other = x.copy()
+        x_other[:, node] = 0.
+        reg = ExtraTreesRegressor(n_estimators=500)
+        reg = reg.fit(x_other, x[:, node])
+        selected_reg = SelectFromModel(reg, 
+                                        threshold="{}*mean".format(config["pns_threshold"]),
+                                        prefit=True,
+                                        max_features=config["num_neighbors"])
+        mask_selected = selected_reg.get_support(indices=False).astype(float)
+        model_mask[:, node] = mask_selected
+    with torch.no_grad():
+        model.mask.copy_(torch.Tensor(model_mask))
 
+    """optimization process"""
+    model.train()
+    optimizer = torch.optim.RMSprop(model.parameters(), lr=config["lr"])
+    
     # initial values
     rho = config["rho"]
     alpha = config["alpha"]
     h = config["h"]
-
-    optimizer = torch.optim.RMSprop(model.parameters(), lr=config["lr"])
-
+    
     for iteration in range(config["train_iter"]):
         logs = {
             'loss': [], 
-            'recon': [],
+            'nll': [],
             'aug': [],
         }
         
@@ -225,11 +270,11 @@ def main():
         """clamp edges"""
         if config["edge_clamp_range"] != 0:
             with torch.no_grad():
-                to_keep = (model.get_adjacency() > config["edge_clamp_range"]).type(torch.Tensor)
-                model.mask *= torch.stack([torch.diag(to_keep[:, i]) for i in range(config["d"])], dim=0)
+                to_keep = (model.get_adjacency(norm=config["normalize_W"], square=config["square_W"]) > config["edge_clamp_range"]).type(torch.Tensor)
+                model.mask *= to_keep
         
         with torch.no_grad():
-            h_new = h_fun(model.get_adjacency()).item()
+            h_new = h_fun(model.get_adjacency(norm=config["normalize_W"], square=config["square_W"])).item()
         
         print_input = "[iteration {:03d}]".format(iteration)
         print_input += ''.join([', {}: {:.4f}'.format(x, round(y[0], 2)) for x, y in logs.items()])
@@ -255,12 +300,67 @@ def main():
         
     """Final clamping of all edges"""
     with torch.no_grad():
-        to_keep = (model.get_adjacency() > 0).type(torch.Tensor)
-        model.mask *= torch.stack([torch.diag(to_keep[:, i]) for i in range(config["d"])], dim=0)
+        to_keep = (model.get_adjacency(norm=config["normalize_W"], square=config["square_W"]) > 0).type(torch.Tensor)
+        model.mask *= to_keep
     
+    """to DAG"""
+    model.eval()
+    if config["jacobian"]:
+        jac_avg = torch.zeros(config["d"], config["d"])
+        X.requires_grad = True
+        xhat = model(X)
+        nll = 0.5 * (model.logvar + torch.pow(xhat - X, 2) / torch.max(torch.exp(model.logvar), torch.tensor(1e-8)))
+        nll = torch.unbind(nll, axis=1)
+        for node in range(config["d"]):
+            jac = torch.autograd.grad(nll[node], X, retain_graph=True, grad_outputs=torch.ones(X.shape[0]))[0]
+            jac_avg[node, :] = torch.abs(jac).mean(0)
+        W = jac_avg.t()
+    else:
+        W = model.get_adjacency(norm=config["normalize_W"], square=config["square_W"])
+    
+    W = W.detach().cpu().numpy()
+    with torch.no_grad():
+        thresholds = np.unique(W)
+        for step, t in enumerate(thresholds):
+            to_keep = torch.Tensor(W > t + 1e-8)
+            new_mask = model.mask * to_keep
+            if is_dag(new_mask):
+                model.mask.copy_(new_mask)
+                break
+    
+    # """CAM pruning"""
+    
+    """retrain"""
+    model.train()
+    optimizer = torch.optim.RMSprop(model.parameters(), lr=config["lr"])
+    
+    for iteration in range(config["train_iter"]):
+        try:
+            [batch] = next(train_loader)
+        except:
+            train_loader = iter(data_loader)
+            [batch] = next(train_loader)
+
+        """optimization step on augmented lagrangian"""
+        optimizer.zero_grad()
+        xhat = model(batch)
+        nll = 0.5 * (model.logvar + torch.pow(xhat - batch, 2) / torch.max(torch.exp(model.logvar), torch.tensor(1e-8)))
+        nll = torch.mean(torch.sum(nll, axis=1))
+        loss = nll
+        loss.backward()
+        optimizer.step()
+        
+        print_input = "[iteration {:03d}]".format(iteration)
+        print_input += ', {}: {:.4f}'.format('nll', round(nll.item(), 2))
+        print(print_input)
+        
+        """update log"""
+        wandb.log({'nll' : nll.item()})
+        
     """chech DAGness of estimated weighted graph"""
-    W_est = model.get_adjacency().astype(float).round(2)
-    W_est[np.abs(W_est) < config["w_threshold"]] = 0.
+    W_est = model.get_adjacency(norm=config["normalize_W"], square=config["square_W"])
+    W_est = W_est.detach().numpy().astype(float).round(3)
+    # W_est[np.abs(W_est) < config["w_threshold"]] = 0.
 
     fig = viz_graph(W_est, size=(7, 7), show=config['fig_show'])
     wandb.log({'Graph_est': wandb.Image(fig)})
