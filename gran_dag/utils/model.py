@@ -2,66 +2,6 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
-import math
-#%%
-class LocallyConnected(nn.Module):
-    """Local linear layer (applied to each node(variable))
-    Args:
-        num_linear: num of local linear layers (= num of nodes)
-        in_features: m1
-        out_features: m2
-        bias: whether to include bias or not
-    Shape:
-        - Input: [n, d, m1]
-        - Output: [n, d, m2]
-    Attributes:
-        weight: [d, m1, m2]
-        bias: [d, m2]
-    """
-    
-    def __init__(self, num_linear, input_features, output_features, bias=False):
-        super(LocallyConnected, self).__init__()
-        self.num_linear = num_linear
-        self.input_features = input_features
-        self.output_features = output_features
-        
-        self.weight = nn.Parameter(torch.Tensor(num_linear,
-                                                input_features,
-                                                output_features))
-        if bias:
-            self.bias = nn.Parameter(torch.Tensor(num_linear,
-                                                  output_features))
-        else:
-            # You should always register all possible parameters, but the
-            # optional ones can be None if you want.
-            self.register_parameter('bias', None)
-        self.reset_parameters()
-        
-    @torch.no_grad()
-    def reset_parameters(self):
-        k = 1. / self.input_features
-        bound = math.sqrt(k)
-        nn.init.uniform_(self.weight, -bound, bound)
-        if self.bias is not None:
-            nn.init.uniform_(self.bias, -bound, bound)
-    
-    def forward(self, input: torch.Tensor):
-        # [n, d, 1, m2] = [n, d, 1, m1] @ [1, d, m1, m2]
-        h = torch.matmul(input.unsqueeze(dim=2), self.weight.unsqueeze(dim=0))
-        h = h.squeeze(dim=2)
-        if self.bias is not None:
-            # [n, d, m2] += [d, m2]
-            h += self.bias
-        return h
-    
-    def extra_repr(self):
-        # (Optional) Set the extra information about this module. 
-        # You can test it by printing an object of this class.
-        return 'num_linear={}, in_features={}, out_features={}, bias={}'.format(
-            self.num_linear, self.input_features, self.output_features,
-            self.bias is not None
-        )
 #%%
 class GraNDAG(nn.Module):
     """GraNDAG model
@@ -69,57 +9,87 @@ class GraNDAG(nn.Module):
         d: num of nodes
         hidden_dim: hidden dimension of MLP
         num_layers: num of layers
+        num_params: num of parameters of log likelihood
         bias: whether to include bias or not
     Shape:
         - Input: [n, d]
         - Output: [n, d]
     """
     
-    def __init__(self, d, hidden_dim, num_layers, bias=False):
+    def __init__(self, d, hidden_dim, num_layers, num_params=1, bias=False):
         super(GraNDAG, self).__init__()
         self.d = d
         self.hidden_dims = hidden_dim
         self.num_layers = num_layers
+        self.num_params = num_params
         
-        layers = []
-        in_dim = d
-        out_dim = hidden_dim
+        """without bias"""
+        self.weights = []
         for i in range(num_layers):
-            if i == num_layers - 1:
-                out_dim = 1 # dimension of each node == 1
-            layers.append(LocallyConnected(d, in_dim, out_dim, bias=bias))
+            in_dim = out_dim = hidden_dim
             if i == 0:
-                in_dim = hidden_dim
-        self.MLP = nn.ModuleList(layers)
-        
-        """masking layer"""
-        mask = torch.ones(d, d) - torch.eye(d)
-        self.mask = torch.stack([torch.diag(mask[:, i]) for i in range(d)], dim=0)
-    
-    def forward(self, x):
-        x = x.unsqueeze(dim=1) 
-        h = x.repeat((1, self.d, 1)) # [n, d, d], m1 = d
-        h = torch.matmul(h.unsqueeze(dim=2), self.mask.unsqueeze(dim=0)) # [n, d, 1, d] = [n, d, 1, d] @ [1, d, d, d]
-        h = h.squeeze(dim=2)
+                in_dim = d
+            if i == num_layers - 1:
+                out_dim = num_params
+            self.weights.append(nn.Parameter(torch.Tensor(d,
+                                                        out_dim,
+                                                        in_dim)))
 
-        for i, layer in enumerate(self.MLP):
-            h = layer(h)
-            if i != self.num_layers - 1:
+        """masking layer"""
+        self.mask = torch.ones(d, d) - torch.eye(d)
+        
+        self.reset_parameters()
+        
+    def reset_parameters(self):
+        with torch.no_grad():
+            for node in range(self.d):
+                for i, w in enumerate(self.weights):
+                    w = w[node]
+                    nn.init.xavier_uniform_(w, gain=nn.init.calculate_gain("leaky_relu"))
+        
+    def forward(self, x):
+        h = x
+        for k in range(self.num_layers):
+            if k == 0:
+                h = torch.einsum("tij, ljt, bj -> bti", self.weights[k], self.mask.unsqueeze(dim=0), h)
+            else:
+                h = torch.einsum("tij, btj -> bti", self.weights[k], h)
+            if k != self.num_layers - 1:
                 h = F.leaky_relu(h)
         h = h.squeeze(dim=2)
         return h
     
-    def get_adjacency(self):
+    def get_adjacency(self, norm="none", square=False):
         """Get weighted adjacency matrix"""
-        prod = self.mask # [d, d, d]
-        for weight in self.MLP.parameters():
-            if len(weight.shape) < 3: continue # bias
-            w = torch.abs(weight.unsqueeze(dim=0))
-            prod = torch.matmul(prod.unsqueeze(dim=2), w) # [d, d, 1, m2] = [d, d, 1, m1] @ [1, d, m1, m2]
-            prod = prod.squeeze(dim=2)
-        prod = torch.sum(prod, axis=-1) # [j, i]
-        W = prod.t() # adjacency matrix, [i, j]
-        return W
+        # norm: normalize connectivity matrix
+        prod = torch.eye(self.d)
+        if norm != "none":
+            prod_norm = torch.eye(self.d)
+        for i, w in enumerate(self.weights):
+            if square: 
+                w = w ** 2
+            else:
+                w = torch.abs(w)
+            if i == 0:
+                prod = torch.einsum("tij, ljt, jk -> tik", w, self.mask.unsqueeze(dim=0), prod)
+                if norm != "none":
+                    tmp = 1. - torch.eye(self.d)
+                    prod_norm = torch.einsum("tij, ljt, jk -> tik", torch.ones_like(w).detach(), tmp.unsqueeze(dim=0), prod_norm)
+            else:
+                prod = torch.einsum("tij, tjk -> tik", w, prod)
+                if norm != "none":
+                    prod_norm = torch.einsum("tij, tjk -> tik", torch.ones_like(w).detach(), prod_norm)
+
+        # sum over density parameter axis
+        prod = torch.sum(prod, axis=1)
+        if norm == "path":
+            prod_norm = torch.sum(prod_norm, axis=1)
+            denominator = prod_norm + torch.eye(self.d) # avoid divide 0 on diagonals
+            return (prod / denominator).t()
+        elif norm == 'none':
+            return prod.t()
+        else:
+            raise NotImplementedError
 #%%
 def main():
     n = 20
@@ -132,7 +102,7 @@ def main():
     x = torch.rand(n, d)
     recon = model(x)
     assert recon.shape == (n, d)
-    assert model.mask.shape == (d, d, d)
+    assert model.mask.shape == (d, d)
     assert model.get_adjacency().shape == (d, d)
     print('model test pass!')
 #%%
@@ -142,45 +112,68 @@ if __name__ == "__main__":
 # d = config["d"]
 # hidden_dim = config["hidden_dim"]
 # num_layers = config["num_layers"]
+# num_params = 1
 
+# [batch] = next(train_loader)
 # batch.shape
 
 # """without bias"""
-# bias = True
-# layers = []
-# in_dim = d
-# out_dim = hidden_dim
+# bias = False
+# weights = []
 # for i in range(num_layers):
-#     if i == num_layers - 1:
-#         out_dim = 1 # dimension of each node == 1
-#     layers.append(LocallyConnected(d, in_dim, out_dim, bias=bias))
+#     in_dim = out_dim = hidden_dim
 #     if i == 0:
-#         in_dim = hidden_dim
-# MLP = nn.ModuleList(layers)
-# #%%
+#         in_dim = d
+#     if i == num_layers - 1:
+#         out_dim = num_params
+#     weights.append(nn.Parameter(torch.Tensor(d,
+#                                             out_dim,
+#                                             in_dim)))
+
+# print([w.shape for w in weights])
 # """masking layer"""
 # mask = torch.ones(d, d) - torch.eye(d)
-# mask = torch.stack([torch.diag(mask[i]) for i in range(d)], dim=0)
-
-# x = batch.unsqueeze(dim=1) 
-# h = x.repeat((1, d, 1)) # [n, d, d], m1 = d
-# h = torch.matmul(h.unsqueeze(dim=2), mask.unsqueeze(dim=0)) # [n, d, 1, d] = [n, d, 1, d] @ [1, d, d, d]
-# h = h.squeeze(dim=2)
-# h.shape
-
-# for i, layer in enumerate(MLP):
-#     h = layer(h)
-#     if i != config["num_layers"] - 1:
+# #%%
+# h = batch
+# for k in range(num_layers):
+#     if k == 0:
+#         h = torch.einsum("tij, ljt, bj -> bti", weights[k], mask.unsqueeze(dim=0), h)
+#     else:
+#         h = torch.einsum("tij, btj -> bti", weights[k], h)
+#     if k != num_layers - 1:
 #         h = F.leaky_relu(h)
 # h = h.squeeze(dim=2)
 # h.shape
 # #%%
-# prod = mask # [d, d, d]
-# for weight in MLP.parameters():
-#     if len(weight.shape) < 3: continue # bias
-#     w = torch.abs(weight.unsqueeze(dim=0))
-#     prod = torch.matmul(prod.unsqueeze(dim=2), w) # [d, d, 1, m2] = [d, d, 1, m1] @ [1, d, m1, m2]
-#     prod = prod.squeeze(dim=2)
-# prod = torch.sum(prod, axis=-1) # [j, i]
-# prod.t() # adjacency matrix
+# norm = "none" # normalize connectivity matrix
+# square = False
+
+# prod = torch.eye(d)
+# if norm != "none":
+#     prod_norm = torch.eye(d)
+# for i, w in enumerate(weights):
+#     if square: 
+#         w = w ** 2
+#     else:
+#         w = torch.abs(w)
+#     if i == 0:
+#         prod = torch.einsum("tij, ljt, jk -> tik", w, mask.unsqueeze(dim=0), prod)
+#         if norm != "none":
+#             tmp = 1. - torch.eye(d)
+#             prod_norm = torch.einsum("tij, ljt, jk -> tik", torch.ones_like(w).detach(), tmp.unsqueeze(dim=0), prod_norm)
+#     else:
+#         prod = torch.einsum("tij, tjk -> tik", w, prod)
+#         if norm != "none":
+#             prod_norm = torch.einsum("tij, tjk -> tik", torch.ones_like(w).detach(), prod_norm)
+
+# # sum over density parameter axis
+# prod = torch.sum(prod, axis=1)
+# if norm == "path":
+#     prod_norm = torch.sum(prod_norm, axis=1)
+#     denominator = prod_norm + torch.eye(d)
+#     return (prod / denominator).t()
+# elif norm == 'none':
+#     return prod.t()
+# else:
+#     raise NotImplementedError
 #%%

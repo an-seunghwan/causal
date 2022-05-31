@@ -41,8 +41,7 @@ except:
 wandb.init(
     project="(causal)GRAN-DAG", 
     entity="anseunghwan",
-    tags=["notears", "linear"],
-    # name='notears'
+    tags=["nonlinear"],
 )
 #%%
 import ast
