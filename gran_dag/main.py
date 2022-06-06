@@ -65,7 +65,7 @@ def get_args(debug):
                         help='the number of dataset')
     parser.add_argument('--d', default=10, type=int,
                         help='the number of nodes')
-    parser.add_argument('--s0', default=10, type=int,
+    parser.add_argument('--s0', default=15, type=int,
                         help='expected number of edges')
     parser.add_argument('--graph_type', type=str, default='ER',
                         help='graph type: ER, SF, BP')
@@ -74,7 +74,7 @@ def get_args(debug):
     parser.add_argument('--normalize_data', type=bool, default=True,
                         help='normalize dataset')
 
-    parser.add_argument('--rho', default=1e-3, type=float,
+    parser.add_argument('--rho', default=1, type=float,
                         help='rho')
     parser.add_argument('--alpha', default=0, type=float,
                         help='alpha')
@@ -83,32 +83,32 @@ def get_args(debug):
     
     parser.add_argument("--num_layers", default=3, type=int,
                         help="hidden dimensions for MLP")
-    parser.add_argument("--hidden_dim", default=8, type=int,
+    parser.add_argument("--hidden_dim", default=10, type=int,
                         help="hidden dimensions for MLP")
     
     parser.add_argument('--batch_size', default=64, type=float,
                         help='learning rate')
     parser.add_argument('--lr', default=0.001, type=float,
                         help='learning rate')
-    parser.add_argument('--train_iter', default=100, type=int,
+    parser.add_argument('--max_iter', default=1000, type=int,
+                        help='maximum iteration')
+    parser.add_argument('--train_iter', default=300, type=int,
                         help='maximum iteration')
     parser.add_argument('--h_tol', default=1e-8, type=float,
                         help='h value tolerance')
-    # parser.add_argument('--w_threshold', default=0.3, type=float,
-    #                     help='weight adjacency matrix threshold')
-    parser.add_argument('--progress_rate', default=0.9, type=float,
+    parser.add_argument('--progress_rate', default=0.25, type=float,
                         help='progress rate')
     parser.add_argument('--rho_rate', default=10, type=float,
                         help='rho rate')
     
     parser.add_argument('--normalize_W', type=str, default='path',
                         help='normalize weighed adjacency matrix, "none" does not normalize')
-    parser.add_argument('--square_W', type=bool, default=False,
+    parser.add_argument('--square_W', type=bool, default=True,
                         help='if True, connectivity matrix is computed with absolute, otherwise, with square')
     parser.add_argument('--jacobian', type=bool, default=True,
                         help='use Jacobian in thresholding')
     
-    parser.add_argument('--pns_threshold', type=float, default=1e-4,
+    parser.add_argument('--pns_threshold', type=float, default=0.75,
                         help='threshold in PNS')
     parser.add_argument('--num_neighbors', type=int, default=None,
                         help='number of neighbors to select in PNS')
@@ -122,29 +122,6 @@ def get_args(debug):
         return parser.parse_args(args=[])
     else:    
         return parser.parse_args()
-
-# config = {
-#     "seed": 10,
-#     "n": 1000,
-#     "d": 5,
-#     "s0": 5,
-#     "graph_type": 'ER',
-#     "sem_type": 'gauss',
-    
-#     "rho": 1, # initial value
-#     "alpha": 0., # initial value
-#     "h": np.inf, # initial value
-    
-#     "lr": 0.001,
-#     "loss_type": 'l2',
-#     "max_iter": 100, 
-#     "h_tol": 1e-8, 
-#     "w_threshold": 0.2,
-#     "lambda": 0.005,
-#     "progress_rate": 0.25,
-#     "rho_max": 1e+16, 
-#     "rho_rate": 2.,
-# }
 #%%
 def h_fun(W):
     """Evaluate DAGness constraint"""
@@ -156,7 +133,8 @@ def loss_function(batch, model, alpha, rho, config):
     loss_ = []
     
     xhat = model(batch)
-    W = model.get_adjacency(norm=config["normalize_W"], square=config["square_W"])
+    W = model.get_adjacency(norm=config["normalize_W"], 
+                            square=config["square_W"])
     
     nll = 0.5 * (model.logvar + torch.pow(xhat - batch, 2) / torch.max(torch.exp(model.logvar), torch.tensor(1e-8)))
     nll = torch.mean(torch.sum(nll, axis=1))
@@ -218,22 +196,29 @@ def main():
         model.cuda()
         
     """Preliminary Neighborhood Selection"""
-    print("Preliminary Neighborhood Selection...\n")
-    x = X.detach().numpy().copy()
-    model_mask = model.mask.detach().cpu().numpy()
-    for node in range(config["d"]):
-        x_other = x.copy()
-        x_other[:, node] = 0.
-        reg = ExtraTreesRegressor(n_estimators=500)
-        reg = reg.fit(x_other, x[:, node])
-        selected_reg = SelectFromModel(reg, 
-                                        threshold="{}*mean".format(config["pns_threshold"]),
-                                        prefit=True,
-                                        max_features=config["num_neighbors"])
-        mask_selected = selected_reg.get_support(indices=False).astype(float)
-        model_mask[:, node] = mask_selected
-    with torch.no_grad():
-        model.mask.copy_(torch.Tensor(model_mask))
+    if config["d"] >= 50:
+        print("Preliminary Neighborhood Selection...\n")
+        x = X.detach().numpy().copy()
+        model_mask = model.mask.detach().cpu().numpy()
+        for node in tqdm.tqdm(range(config["d"]), desc="PNS"):
+            x_other = x.copy()
+            x_other[:, node] = 0.
+            reg = ExtraTreesRegressor(n_estimators=500)
+            reg = reg.fit(x_other, x[:, node])
+            if config["num_neighbors"] is None:
+                num_neighbors = config["d"]
+            else:
+                num_neighbors = config["num_neighbors"]
+            selected_reg = SelectFromModel(
+                reg, 
+                threshold="{}*mean".format(config["pns_threshold"]),
+                prefit=True,
+                max_features=num_neighbors
+            )
+            mask_selected = selected_reg.get_support(indices=False).astype(float)
+            model_mask[:, node] *= mask_selected
+        with torch.no_grad():
+            model.mask.copy_(torch.Tensor(model_mask))
 
     """optimization process"""
     print("optimization process...\n")
@@ -245,40 +230,45 @@ def main():
     alpha = config["alpha"]
     h = config["h"]
     
-    for iteration in range(config["train_iter"]):
+    for iteration in range(config["max_iter"]):
         logs = {
-            'loss': [], 
-            'nll': [],
-            'aug': [],
-        }
-        
-        try:
-            [batch] = next(train_loader)
-        except:
-            train_loader = iter(data_loader)
-            [batch] = next(train_loader)
+                'loss': [], 
+                'nll': [],
+                'aug': [],
+            }
+        for epoch in tqdm.tqdm(range(config["train_iter"]), desc="primal update"):
+            
+            try:
+                [batch] = next(train_loader)
+            except:
+                train_loader = iter(data_loader)
+                [batch] = next(train_loader)
 
-        """optimization step on augmented lagrangian"""
-        optimizer.zero_grad()
-        loss, loss_ = loss_function(batch, model, alpha, rho, config)
-        loss.backward()
-        optimizer.step()
-        
-        """accumulate losses"""
-        for x, y in loss_:
-            logs[x] = logs.get(x) + [y.item()]
-        
-        """clamp edges"""
-        if config["edge_clamp_range"] != 0:
-            with torch.no_grad():
-                to_keep = (model.get_adjacency(norm=config["normalize_W"], square=config["square_W"]) > config["edge_clamp_range"]).type(torch.Tensor)
-                model.mask *= to_keep
-        
-        with torch.no_grad():
-            h_new = h_fun(model.get_adjacency(norm=config["normalize_W"], square=config["square_W"])).item()
+            """optimization step on augmented lagrangian"""
+            optimizer.zero_grad()
+            loss, loss_ = loss_function(batch, model, alpha, rho, config)
+            loss.backward()
+            optimizer.step()
+            
+            """accumulate losses"""
+            for x, y in loss_:
+                logs[x] = logs.get(x) + [y.item()]
+            
+            """clamp edges"""
+            if config["edge_clamp_range"] != 0:
+                with torch.no_grad():
+                    w_adj = model.get_adjacency(norm=config["normalize_W"], square=config["square_W"])
+                    to_keep = (w_adj > config["edge_clamp_range"]).type(torch.Tensor)
+                    model.mask *= to_keep
+                    
+                    h_new = h_fun(w_adj).item()
+            else:
+                with torch.no_grad():
+                    w_adj = model.get_adjacency(norm=config["normalize_W"], square=config["square_W"])
+                    h_new = h_fun(w_adj).item()
         
         print_input = "[iteration {:03d}]".format(iteration)
-        print_input += ''.join([', {}: {:.4f}'.format(x, round(y[0], 2)) for x, y in logs.items()])
+        print_input += ''.join([', {}: {:.4f}'.format(x, round(np.mean(y), 2)) for x, y in logs.items()])
         print_input += ', h(W): {:.8f}'.format(h_new)
         print(print_input)
         
@@ -301,7 +291,7 @@ def main():
         
     """Final clamping of all edges"""
     with torch.no_grad():
-        to_keep = (model.get_adjacency(norm=config["normalize_W"], square=config["square_W"]) > 0).type(torch.Tensor)
+        to_keep = (w_adj > 0).type(torch.Tensor)
         model.mask *= to_keep
     
     """to DAG"""
@@ -361,9 +351,10 @@ def main():
         wandb.log({'nll' : nll.item()})
         
     """chech DAGness of estimated weighted graph"""
-    W_est = model.get_adjacency(norm=config["normalize_W"], square=config["square_W"])
-    W_est = W_est.detach().numpy().astype(float).round(3)
-    # W_est[np.abs(W_est) < config["w_threshold"]] = 0.
+    # W_est = model.get_adjacency(norm=config["normalize_W"], square=config["square_W"])
+    # W_est = W_est.detach().numpy().astype(float).round(3)
+    W_est = model.mask
+    W_est = W_est.detach().numpy().astype(float)
 
     fig = viz_graph(W_est, size=(7, 7), show=config['fig_show'])
     wandb.log({'Graph_est': wandb.Image(fig)})
@@ -373,7 +364,7 @@ def main():
     wandb.run.summary['Is DAG?'] = is_dag(W_est)
     wandb.run.summary['W_est'] = wandb.Table(data=pd.DataFrame(W_est))
 
-    B_est = (W_est != 0).astype(float)
+    B_est = W_est
     W_diff_ = np.abs(B_true - B_est)
 
     fig = viz_graph(W_diff_, size=(7, 7), show=config['fig_show'])
