@@ -69,12 +69,12 @@ def get_args(debug):
                         help='expected number of edges')
     parser.add_argument('--graph_type', type=str, default='ER',
                         help='graph type: ER, SF, BP')
-    parser.add_argument('--sem_type', type=str, default='gp-add',
+    parser.add_argument('--sem_type', type=str, default='mim',
                         help='sem type: mlp, mim, gp, gp-add')
     parser.add_argument('--normalize_data', type=bool, default=True,
                         help='normalize dataset')
 
-    parser.add_argument('--rho', default=1e-3, type=float,
+    parser.add_argument('--rho', default=1, type=float,
                         help='rho')
     parser.add_argument('--alpha', default=0, type=float,
                         help='alpha')
@@ -86,8 +86,8 @@ def get_args(debug):
     parser.add_argument("--hidden_dim", default=10, type=int,
                         help="hidden dimensions for MLP")
     
-    parser.add_argument('--batch_size', default=64, type=float,
-                        help='learning rate')
+    parser.add_argument('--batch_size', default=128, type=int,
+                        help='batch size')
     parser.add_argument('--lr', default=0.001, type=float,
                         help='learning rate')
     parser.add_argument('--max_iter', default=1000, type=int,
@@ -103,7 +103,7 @@ def get_args(debug):
     
     parser.add_argument('--normalize_W', type=str, default='path',
                         help='normalize weighed adjacency matrix, "none" does not normalize')
-    parser.add_argument('--square_W', type=bool, default=True,
+    parser.add_argument('--square_W', type=bool, default=False,
                         help='if True, connectivity matrix is computed with absolute, otherwise, with square')
     parser.add_argument('--jacobian', type=bool, default=True,
                         help='use Jacobian in thresholding')
@@ -112,7 +112,7 @@ def get_args(debug):
                         help='threshold in PNS')
     parser.add_argument('--num_neighbors', type=int, default=None,
                         help='number of neighbors to select in PNS')
-    parser.add_argument('--edge_clamp_range', type=float, default=1e-4,
+    parser.add_argument('--edge_clamp_range', type=float, default=0.0001,
                         help='as we train, clamping the edges (i,j) to zero when prod_ij is that close to zero. '
                             '0 means no clamping. Uses masks on inputs. Once an edge is clamped, no way back.')
     
@@ -254,18 +254,18 @@ def main():
             for x, y in loss_:
                 logs[x] = logs.get(x) + [y.item()]
             
-            """clamp edges"""
-            if config["edge_clamp_range"] != 0:
-                with torch.no_grad():
-                    w_adj = model.get_adjacency(norm=config["normalize_W"], square=config["square_W"])
-                    to_keep = (w_adj > config["edge_clamp_range"]).type(torch.Tensor)
-                    model.mask *= to_keep
-                    
-                    h_new = h_fun(w_adj).item()
-            else:
-                with torch.no_grad():
-                    w_adj = model.get_adjacency(norm=config["normalize_W"], square=config["square_W"])
-                    h_new = h_fun(w_adj).item()
+        """clamp edges"""
+        if config["edge_clamp_range"] != 0:
+            with torch.no_grad():
+                w_adj = model.get_adjacency(norm=config["normalize_W"], square=config["square_W"])
+                to_keep = (w_adj > config["edge_clamp_range"]).type(torch.Tensor)
+                model.mask *= to_keep
+                
+                h_new = h_fun(w_adj).item()
+        else:
+            with torch.no_grad():
+                w_adj = model.get_adjacency(norm=config["normalize_W"], square=config["square_W"])
+                h_new = h_fun(w_adj).item()
         
         print_input = "[iteration {:03d}]".format(iteration)
         print_input += ''.join([', {}: {:.4f}'.format(x, round(np.mean(y), 2)) for x, y in logs.items()])
