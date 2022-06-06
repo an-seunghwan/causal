@@ -43,80 +43,110 @@ wandb.init(
     tags=["nonlinear"],
 )
 #%%
-config = {
-    "seed": 1,
-    'data_type': 'synthetic', # discrete, real
-    "n": 5000,
-    "d": 10,
-    "degree": 2,
-    "x_dim": 1,
-    "graph_type": "ER",
-    "sem_type": "gauss",
-    "nonlinear_type": "nonlinear_2",
-    "hidden": 64,
-    
-    "epochs": 300,
-    "lr": 0.003,
-    "lr_decay": 200,
-    "gamma": 1.,
-    "batch_size": 100,
-    
-    "rho": 1, # initial value
-    "alpha": 0., # initial value
-    "h": np.inf, # initial value
-    
-    "max_iter": 100, 
-    "loss_type": 'l2',
-    "h_tol": 1e-8, 
-    "w_threshold": 0.3,
-    "lambda": 0.,
-    "progress_rate": 0.25,
-    "rho_max": 1e+20, 
-    "rho_rate": 10,
-    
-    "fig_show": False,
-}
-#%%
-config["cuda"] = torch.cuda.is_available()
+import argparse
+def get_args(debug):
+    parser = argparse.ArgumentParser('parameters')
 
-set_random_seed(config["seed"])
-torch.manual_seed(config["seed"])
-if config["cuda"]:
-    torch.cuda.manual_seed(config["seed"])
-train_loader, W_true = load_data(config)
+    parser.add_argument('--seed', type=int, default=1, 
+                        help='seed for repeatable results')
+    parser.add_argument('--n', default=5000, type=int,
+                        help='the number of dataset')
+    parser.add_argument('--d', default=10, type=int,
+                        help='the number of nodes')
+    parser.add_argument('--degree', default=2, type=int,
+                        help='expected number of edges')
+    parser.add_argument('--graph_type', type=str, default='ER',
+                        help='graph type: ER, SF, BP')
+    parser.add_argument('--sem_type', type=str, default='gauss',
+                        help='sem type: gauss, exp, gumbel, uniform, logistic, poisson')
+    parser.add_argument('--nonlinear_type', type=str, default='nonlinear_2',
+                        help='nonlinear causal structure type: nonlinear_1, nonlinear_2')
 
-wandb.run.summary['W_true'] = wandb.Table(data=pd.DataFrame(W_true))
-fig = viz_graph(W_true, size=(7, 7), show=config["fig_show"])
-wandb.log({'Graph': wandb.Image(fig)})
-fig = viz_heatmap(W_true, size=(5, 4), show=config["fig_show"])
-wandb.log({'heatmap': wandb.Image(fig)})
-#%%
-"""initialize adjacency matrix A"""
-adj_A = np.zeros((config["d"], config["d"]))
+    parser.add_argument('--rho', default=1, type=float,
+                        help='rho')
+    parser.add_argument('--alpha', default=0, type=float,
+                        help='alpha')
+    parser.add_argument('--h', default=np.inf, type=float,
+                        help='h')
+    
+    parser.add_argument("--hidden", default=64, type=int,
+                        help="hidden dimensions for MLP")
+    parser.add_argument("--num_layer", default=2, type=int,
+                        help="hidden dimensions for MLP")
+    parser.add_argument("--x_dim", default=1, type=int,
+                        help="dimension of each node")
+    
+    parser.add_argument('--epochs', default=300, type=int,
+                        help='maximum iteration')
+    parser.add_argument('--batch_size', default=100, type=int,
+                        help='batch size')
+    parser.add_argument('--lr', default=0.003, type=float,
+                        help='learning rate')
+    parser.add_argument('--lr_decay', default=200, type=float,
+                        help='learning rate decay')
+    parser.add_argument('--gamma', default=1, type=float,
+                        help='learning rate decay rate')
+    
+    parser.add_argument('--max_iter', default=100, type=int,
+                        help='maximum number of iteration')
+    parser.add_argument('--h_tol', default=1e-8, type=float,
+                        help='h value tolerance')
+    parser.add_argument('--w_threshold', default=0.3, type=float,
+                        help='threshold for weighted adjacency matrix')
+    parser.add_argument('--lambda', default=0, type=float,
+                        help='coefficient of LASSO penalty')
+    parser.add_argument('--progress_rate', default=0.25, type=float,
+                        help='progress rate')
+    parser.add_argument('--rho_max', default=1e+20, type=float,
+                        help='maximum rho value')
+    parser.add_argument('--rho_rate', default=10, type=float,
+                        help='rho rate')
+    
+    parser.add_argument('--fig_show', default=False, type=bool)
+
+    if debug:
+        return parser.parse_args(args=[])
+    else:    
+        return parser.parse_args()
+    
+# config = {
+#     "seed": 1,
+#     'data_type': 'synthetic', # discrete, real
+#     "n": 5000,
+#     "d": 10,
+#     "degree": 2,
+#     "x_dim": 1,
+#     "graph_type": "ER",
+#     "sem_type": "gauss",
+#     "nonlinear_type": "nonlinear_2",
+#     "hidden": 64,
+    
+#     "epochs": 300,
+#     "lr": 0.003,
+#     "lr_decay": 200,
+#     "gamma": 1.,
+#     "batch_size": 100,
+    
+#     "rho": 1, # initial value
+#     "alpha": 0., # initial value
+#     "h": np.inf, # initial value
+    
+#     "max_iter": 100, 
+#     "loss_type": 'l2',
+#     "h_tol": 1e-8, 
+#     "w_threshold": 0.3,
+#     "lambda": 0.,
+#     "progress_rate": 0.25,
+#     "rho_max": 1e+20, 
+#     "rho_rate": 10,
+    
+#     "fig_show": False,
+# }
 #%%
 def h_fun(A, d):
     x = torch.eye(d).float() + torch.div(A * A, d) # alpha = 1 / d
     return torch.trace(torch.matrix_power(x, d)) - d
 #%%
-wandb.config.update(config)
-
-encoder = Encoder(config, adj_A, config["hidden"])
-decoder = Decoder(config, config["hidden"])
-
-if config["cuda"]:
-    encoder.cuda()
-    decoder.cuda()
-
-optimizer = torch.optim.Adam(
-    list(encoder.parameters()) + list(decoder.parameters()), 
-    lr=config["lr"]
-)
-torch.optim.lr_scheduler.StepLR(
-    optimizer, 
-    step_size=config["lr_decay"],
-    gamma=config["gamma"]
-)
-
 def update_optimizer(optimizer, lr, rho):
     """related to lr to rho, whenever rho gets big, reduce lr propotionally"""
     MAX_LR = 1e-2
@@ -134,7 +164,7 @@ def update_optimizer(optimizer, lr, rho):
         param_group["lr"] = lr
     return optimizer, lr
 #%%
-def train(rho, alpha, config, optimizer):
+def train(train_loader, encoder, decoder, rho, alpha, config, optimizer):
     encoder.train()
     decoder.train()
     
@@ -198,72 +228,112 @@ def train(rho, alpha, config, optimizer):
             
     return logs, adj_A_amplified
 #%%
-rho = config["rho"]
-alpha = config["alpha"]
-h = config["h"]
+def main():
+    config = vars(get_args(debug=False)) # default configuration
+    config["cuda"] = torch.cuda.is_available()
+    wandb.config.update(config)
+
+    set_random_seed(config["seed"])
+    torch.manual_seed(config["seed"])
+    if config["cuda"]:
+        torch.cuda.manual_seed(config["seed"])
+    train_loader, W_true = load_data(config)
+
+    wandb.run.summary['W_true'] = wandb.Table(data=pd.DataFrame(W_true))
+    fig = viz_graph(W_true, size=(7, 7), show=config["fig_show"])
+    wandb.log({'Graph': wandb.Image(fig)})
+    fig = viz_heatmap(W_true, size=(5, 4), show=config["fig_show"])
+    wandb.log({'heatmap': wandb.Image(fig)})
     
-for iteration in range(config["max_iter"]):
+    """initialize adjacency matrix A"""
+    adj_A = np.zeros((config["d"], config["d"]))
     
-    """primal problem"""
-    while rho < config["rho_max"]:
-        # find argmin of primal problem (local solution) = update for config["epochs"] times
-        for epoch in tqdm.tqdm(range(config["epochs"]), desc="primal update"):
-            logs, adj_A_amplified = train(rho, alpha, config, optimizer)
-        # only one epoch is fine for finding argmin
-        # logs, adj_A_amplified = train(rho, alpha, config, optimizer)
+    encoder = Encoder(config, adj_A, config["hidden"])
+    decoder = Decoder(config, config["hidden"])
+
+    if config["cuda"]:
+        encoder.cuda()
+        decoder.cuda()
+
+    optimizer = torch.optim.Adam(
+        list(encoder.parameters()) + list(decoder.parameters()), 
+        lr=config["lr"]
+    )
+    torch.optim.lr_scheduler.StepLR(
+        optimizer, 
+        step_size=config["lr_decay"],
+        gamma=config["gamma"]
+    )
+
+    rho = config["rho"]
+    alpha = config["alpha"]
+    h = config["h"]
         
-        W_est = adj_A_amplified.data.clone()
-        h_new = h_fun(W_est, config["d"])
-        if h_new.item() > config["progress_rate"] * h:
-            rho *= config["rho_rate"]
-        else:
+    for iteration in range(config["max_iter"]):
+        
+        """primal problem"""
+        while rho < config["rho_max"]:
+            # find argmin of primal problem (local solution) = update for config["epochs"] times
+            for epoch in tqdm.tqdm(range(config["epochs"]), desc="primal update"):
+                logs, adj_A_amplified = train(train_loader, encoder, decoder, rho, alpha, config, optimizer)
+            # only one epoch is fine for finding argmin
+            # logs, adj_A_amplified = train(rho, alpha, config, optimizer)
+            
+            W_est = adj_A_amplified.data.clone()
+            h_new = h_fun(W_est, config["d"])
+            if h_new.item() > config["progress_rate"] * h:
+                rho *= config["rho_rate"]
+            else:
+                break
+        
+        """dual ascent"""
+        h = h_new.item()
+        alpha += rho * h_new.item()
+        
+        print_input = "[iteration {:03d}]".format(iteration)
+        print_input += ''.join([', {}: {:.4f}'.format(x, np.mean(y).round(2)) for x, y in logs.items()])
+        print_input += ', h(W): {:.8f}'.format(h)
+        print(print_input)
+        
+        """update log"""
+        wandb.log({x : np.mean(y) for x, y in logs.items()})
+        wandb.log({'h(W)' : h})
+        
+        """stopping rule"""
+        if h_new.item() <= config["h_tol"]:
             break
     
-    """dual ascent"""
-    h = h_new.item()
-    alpha += rho * h_new.item()
+    """final metrics"""
+    adj_A_amplified = encoder.amplified_adjacency_matrix()
+    W_est = adj_A_amplified.data.clone().numpy()
+    W_est[np.abs(W_est) < config["w_threshold"]] = 0.
+    W_est = W_est.astype(float).round(2)
+
+    fig = viz_graph(W_est, size=(7, 7), show=config["fig_show"])
+    wandb.log({'Graph_est': wandb.Image(fig)})
+    fig = viz_heatmap(W_est, size=(5, 4), show=config["fig_show"])
+    wandb.log({'heatmap_est': wandb.Image(fig)})
+
+    wandb.run.summary['Is DAG?'] = is_dag(W_est)
+    wandb.run.summary['W_est'] = wandb.Table(data=pd.DataFrame(W_est))
+    wandb.run.summary['W_diff'] = wandb.Table(data=pd.DataFrame(W_true - W_est))
+
+    W_ = (W_true != 0).astype(float)
+    W_est_ = (W_est != 0).astype(float)
+    W_diff_ = np.abs(W_ - W_est_)
+
+    fig = viz_graph(W_diff_, size=(7, 7))
+    wandb.log({'Graph_diff': wandb.Image(fig)})
+
+    B_est = (W_est != 0).astype(float)
+    B_true = (W_true != 0).astype(float)
+
+    """accuracy"""
+    acc = count_accuracy(B_true, B_est)
+    wandb.log(acc)
     
-    print_input = "[iteration {:03d}]".format(iteration)
-    print_input += ''.join([', {}: {:.4f}'.format(x, np.mean(y).round(2)) for x, y in logs.items()])
-    print_input += ', h(W): {:.8f}'.format(h)
-    print(print_input)
-    
-    """update log"""
-    wandb.log({x : np.mean(y) for x, y in logs.items()})
-    wandb.log({'h(W)' : h})
-    
-    """stopping rule"""
-    if h_new.item() <= config["h_tol"]:
-        break
+    wandb.run.finish()
 #%%
-"""final metrics"""
-adj_A_amplified = encoder.amplified_adjacency_matrix()
-W_est = adj_A_amplified.data.clone().numpy()
-W_est[np.abs(W_est) < config["w_threshold"]] = 0.
-W_est = W_est.astype(float).round(2)
-
-fig = viz_graph(W_est, size=(7, 7), show=config["fig_show"])
-wandb.log({'Graph_est': wandb.Image(fig)})
-fig = viz_heatmap(W_est, size=(5, 4), show=config["fig_show"])
-wandb.log({'heatmap_est': wandb.Image(fig)})
-
-wandb.run.summary['Is DAG?'] = is_dag(W_est)
-wandb.run.summary['W_est'] = wandb.Table(data=pd.DataFrame(W_est))
-wandb.run.summary['W_diff'] = wandb.Table(data=pd.DataFrame(W_true - W_est))
-
-W_ = (W_true != 0).astype(float)
-W_est_ = (W_est != 0).astype(float)
-W_diff_ = np.abs(W_ - W_est_)
-
-fig = viz_graph(W_diff_, size=(7, 7))
-wandb.log({'Graph_diff': wandb.Image(fig)})
-
-B_est = (W_est != 0).astype(float)
-B_true = (W_true != 0).astype(float)
-
-# compute metrics
-acc = count_accuracy(B_true, B_est)
-wandb.log(acc)
-#%%
-wandb.run.finish()
+if __name__ == '__main__':
+    main()
 #%%

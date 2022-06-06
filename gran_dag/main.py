@@ -98,6 +98,8 @@ def get_args(debug):
                         help='h value tolerance')
     parser.add_argument('--progress_rate', default=0.25, type=float,
                         help='progress rate')
+    parser.add_argument('--rho_max', default=1e+20, type=float,
+                        help='maximums rho value')
     parser.add_argument('--rho_rate', default=10, type=float,
                         help='rho rate')
     
@@ -231,28 +233,39 @@ def main():
     h = config["h"]
     
     for iteration in range(config["max_iter"]):
-        logs = {
+        
+        while rho < config["rho_max"]:
+            logs = {
                 'loss': [], 
                 'nll': [],
                 'aug': [],
             }
-        for epoch in tqdm.tqdm(range(config["train_iter"]), desc="primal update"):
-            
-            try:
-                [batch] = next(train_loader)
-            except:
-                train_loader = iter(data_loader)
-                [batch] = next(train_loader)
+            for epoch in tqdm.tqdm(range(config["train_iter"]), desc="primal update"):
+                
+                try:
+                    [batch] = next(train_loader)
+                except:
+                    train_loader = iter(data_loader)
+                    [batch] = next(train_loader)
 
-            """optimization step on augmented lagrangian"""
-            optimizer.zero_grad()
-            loss, loss_ = loss_function(batch, model, alpha, rho, config)
-            loss.backward()
-            optimizer.step()
+                """optimization step on augmented lagrangian"""
+                optimizer.zero_grad()
+                loss, loss_ = loss_function(batch, model, alpha, rho, config)
+                loss.backward()
+                optimizer.step()
+                
+                """accumulate losses"""
+                for x, y in loss_:
+                    logs[x] = logs.get(x) + [y.item()]
             
-            """accumulate losses"""
-            for x, y in loss_:
-                logs[x] = logs.get(x) + [y.item()]
+            with torch.no_grad():
+                W = model.get_adjacency(norm=config["normalize_W"], 
+                                        square=config["square_W"])
+                h_new = h_fun(W).item()
+                if h_new > config["progress_rate"] * h:
+                    rho *= config["rho_rate"]
+                else:
+                    break
             
         """clamp edges"""
         if config["edge_clamp_range"] != 0:
