@@ -58,7 +58,7 @@ def get_args(debug):
 
     parser.add_argument('--seed', type=int, default=1, 
                         help='seed for repeatable results')
-    parser.add_argument('--n', default=1000, type=int,
+    parser.add_argument('--n', default=5000, type=int,
                         help='the number of dataset')
     parser.add_argument('--d', default=10, type=int,
                         help='the number of nodes')
@@ -66,7 +66,7 @@ def get_args(debug):
                         help='expected number of edges')
     parser.add_argument('--graph_type', type=str, default='ER',
                         help='graph type: ER, SF, BP')
-    parser.add_argument('--sem_type', type=str, default='gp-add',
+    parser.add_argument('--sem_type', type=str, default='mlp',
                         help='sem type: mlp, mim, gp, gp-add')
 
     parser.add_argument('--rho', default=1, type=float,
