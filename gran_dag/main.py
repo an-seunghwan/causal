@@ -74,14 +74,14 @@ def get_args(debug):
     parser.add_argument('--normalize_data', type=bool, default=True,
                         help='normalize dataset')
 
-    parser.add_argument('--rho', default=1, type=float,
+    parser.add_argument('--rho', default=1e-3, type=float,
                         help='rho')
     parser.add_argument('--alpha', default=0, type=float,
                         help='alpha')
     parser.add_argument('--h', default=np.inf, type=float,
                         help='h')
     
-    parser.add_argument("--num_layers", default=3, type=int,
+    parser.add_argument("--num_layers", default=2, type=int,
                         help="hidden dimensions for MLP")
     parser.add_argument("--hidden_dim", default=10, type=int,
                         help="hidden dimensions for MLP")
