@@ -69,7 +69,7 @@ def get_args(debug):
                         help='expected number of edges')
     parser.add_argument('--graph_type', type=str, default='ER',
                         help='graph type: ER, SF, BP')
-    parser.add_argument('--sem_type', type=str, default='mim',
+    parser.add_argument('--sem_type', type=str, default='gp-add',
                         help='sem type: mlp, mim, gp, gp-add')
     parser.add_argument('--normalize_data', type=bool, default=True,
                         help='normalize dataset')
@@ -83,7 +83,7 @@ def get_args(debug):
     
     parser.add_argument("--num_layers", default=2, type=int,
                         help="hidden dimensions for MLP")
-    parser.add_argument("--hidden_dim", default=10, type=int,
+    parser.add_argument("--hidden_dim", default=32, type=int,
                         help="hidden dimensions for MLP")
     
     parser.add_argument('--batch_size', default=128, type=int,
@@ -258,6 +258,7 @@ def main():
                 for x, y in loss_:
                     logs[x] = logs.get(x) + [y.item()]
             
+            """Did the contraint improve sufficiently?"""
             with torch.no_grad():
                 W = model.get_adjacency(norm=config["normalize_W"], 
                                         square=config["square_W"])
@@ -294,9 +295,9 @@ def main():
             """dual ascent step"""
             alpha += rho * h_new
             
-            """Did the contraint improve sufficiently?"""
-            if h_new > config["progress_rate"] * h:
-                rho *= config["rho_rate"]
+            # """Did the contraint improve sufficiently?"""
+            # if h_new > config["progress_rate"] * h:
+            #     rho *= config["rho_rate"]
         else:
             break
         
@@ -335,39 +336,38 @@ def main():
     
     # """CAM pruning"""
     
-    """retrain"""
-    print("retrain...\n")
-    model.train()
-    optimizer = torch.optim.RMSprop(model.parameters(), lr=config["lr"])
+    # """retrain"""
+    # print("retrain...\n")
+    # model.train()
+    # optimizer = torch.optim.RMSprop(model.parameters(), lr=config["lr"])
     
-    for iteration in range(config["train_iter"]):
-        try:
-            [batch] = next(train_loader)
-        except:
-            train_loader = iter(data_loader)
-            [batch] = next(train_loader)
+    # for iteration in range(config["train_iter"]):
+    #     try:
+    #         [batch] = next(train_loader)
+    #     except:
+    #         train_loader = iter(data_loader)
+    #         [batch] = next(train_loader)
 
-        """optimization step on augmented lagrangian"""
-        optimizer.zero_grad()
-        xhat = model(batch)
-        nll = 0.5 * (model.logvar + torch.pow(xhat - batch, 2) / torch.max(torch.exp(model.logvar), torch.tensor(1e-8)))
-        nll = torch.mean(torch.sum(nll, axis=1))
-        loss = nll
-        loss.backward()
-        optimizer.step()
+    #     """optimization step on augmented lagrangian"""
+    #     optimizer.zero_grad()
+    #     xhat = model(batch)
+    #     nll = 0.5 * (model.logvar + torch.pow(xhat - batch, 2) / torch.max(torch.exp(model.logvar), torch.tensor(1e-8)))
+    #     nll = torch.mean(torch.sum(nll, axis=1))
+    #     loss = nll
+    #     loss.backward()
+    #     optimizer.step()
         
-        print_input = "[iteration {:03d}]".format(iteration)
-        print_input += ', {}: {:.4f}'.format('nll', round(nll.item(), 2))
-        print(print_input)
+    #     print_input = "[iteration {:03d}]".format(iteration)
+    #     print_input += ', {}: {:.4f}'.format('nll', round(nll.item(), 2))
+    #     print(print_input)
         
-        """update log"""
-        wandb.log({'nll' : nll.item()})
+    #     """update log"""
+    #     wandb.log({'nll' : nll.item()})
         
     """chech DAGness of estimated weighted graph"""
     # W_est = model.get_adjacency(norm=config["normalize_W"], square=config["square_W"])
     # W_est = W_est.detach().numpy().astype(float).round(3)
-    W_est = model.mask
-    W_est = W_est.detach().numpy().astype(float)
+    W_est = model.mask.detach().numpy().astype(float)
 
     fig = viz_graph(W_est, size=(7, 7), show=config['fig_show'])
     wandb.log({'Graph_est': wandb.Image(fig)})
