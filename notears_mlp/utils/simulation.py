@@ -122,7 +122,7 @@ def simulate_nonlinear_sem(B, n, sem_type, noise_scale=None):
             from sklearn.gaussian_process import GaussianProcessRegressor
             gp = GaussianProcessRegressor()
             x = sum([gp.sample_y(x[:, i, None], random_state=None).flatten()
-                     for i in range(X.shape[1])]) + z
+                     for i in range(x.shape[1])]) + z
         else:
             raise ValueError('unknown sem type')
         return x

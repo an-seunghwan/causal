@@ -58,15 +58,15 @@ def get_args(debug):
 
     parser.add_argument('--seed', type=int, default=1, 
                         help='seed for repeatable results')
-    parser.add_argument('--n', default=200, type=int,
+    parser.add_argument('--n', default=1000, type=int,
                         help='the number of dataset')
-    parser.add_argument('--d', default=5, type=int,
+    parser.add_argument('--d', default=10, type=int,
                         help='the number of nodes')
-    parser.add_argument('--s0', default=9, type=int,
+    parser.add_argument('--s0', default=15, type=int,
                         help='expected number of edges')
     parser.add_argument('--graph_type', type=str, default='ER',
                         help='graph type: ER, SF, BP')
-    parser.add_argument('--sem_type', type=str, default='mim',
+    parser.add_argument('--sem_type', type=str, default='gp-add',
                         help='sem type: mlp, mim, gp, gp-add')
 
     parser.add_argument('--rho', default=1, type=float,
@@ -79,7 +79,7 @@ def get_args(debug):
     parser.add_argument("--hidden_dim", default=[10], type=arg_as_list,
                         help="hidden dimensions for MLP")
     
-    parser.add_argument('--epochs', default=300, type=float,
+    parser.add_argument('--epochs', default=300, type=int,
                         help='learning rate')
     parser.add_argument('--lr', default=0.001, type=float,
                         help='learning rate')
@@ -87,11 +87,11 @@ def get_args(debug):
                         help='maximum iteration')
     parser.add_argument('--h_tol', default=1e-8, type=float,
                         help='h value tolerance')
-    parser.add_argument('--w_threshold', default=0.3, type=float,
+    parser.add_argument('--w_threshold', default=0.1, type=float,
                         help='weight adjacency matrix threshold')
     parser.add_argument('--lambda1', default=0.01, type=float,
                         help='weight of LASSO regularization')
-    parser.add_argument('--lambda2', default=0.01, type=float,
+    parser.add_argument('--lambda2', default=0.001, type=float,
                         help='weight of Ridge regularization')
     parser.add_argument('--progress_rate', default=0.25, type=float,
                         help='progress rate')
@@ -157,9 +157,9 @@ def loss_function(X, model, alpha, rho, config):
 #%%
 def main():
     config = vars(get_args(debug=False)) # default configuration
+    config["cuda"] = torch.cuda.is_available()
     wandb.config.update(config)
 
-    config["cuda"] = torch.cuda.is_available()
     set_random_seed(config["seed"])
     torch.manual_seed(config["seed"])
     if config["cuda"]:
@@ -252,8 +252,9 @@ def main():
             break
         
     """chech DAGness of estimated weighted graph"""
-    W_est = model.get_adjacency().astype(float).round(2)
+    W_est = model.get_adjacency().astype(float)
     W_est[np.abs(W_est) < config["w_threshold"]] = 0.
+    W_est = W_est.round(3)
 
     fig = viz_graph(W_est, size=(7, 7), show=config['fig_show'])
     wandb.log({'Graph_est': wandb.Image(fig)})
