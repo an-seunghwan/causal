@@ -5,15 +5,17 @@ metric:
   goal: minimize
   name: loss
 parameters:
-  rho:
-    values: [0.001, 1]
-  num_layers:
-    values: [2, 3]
-  batch_size:
-    values: [64, 128, 256]
-  progress_rate:
-    values: [0.25, 0.5, 0.75, 0.9]
-  square_W:
-    values: [True, False]
-  edge_clamp_range:
-    values: [0.0001, 0.001, 0.01]
+  seed:
+    values: [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+  # rho:
+  #   values: [0.001, 1]
+  # num_layers:
+  #   values: [2, 3]
+  # batch_size:
+  #   values: [64, 128, 256]
+  # progress_rate:
+  #   values: [0.25, 0.5, 0.75, 0.9]
+  # square_W:
+  #   values: [True, False]
+  # edge_clamp_range:
+  #   values: [0.0001, 0.001, 0.01]
