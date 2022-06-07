@@ -80,7 +80,7 @@ def get_args(debug):
                         help='progress rate')
     parser.add_argument('--rho_max', default=1e+16, type=float,
                         help='rho max')
-    parser.add_argument('--rho_rate', default=10, type=float,
+    parser.add_argument('--rho_rate', default=2, type=float,
                         help='rho rate')
 
     if debug:
@@ -138,7 +138,7 @@ def loss_function(X, W_est, alpha, rho, config):
     return loss, loss_
 #%%
 def main():
-    config = vars(get_args(debug=True)) # default configuration
+    config = vars(get_args(debug=False)) # default configuration
     wandb.config.update(config)
 
     '''simulate DAG and weighted adjacency matrix'''

@@ -16,7 +16,7 @@ except:
     import wandb
 #%%
 out = subprocess.run(
-    ["wandb", "sweep", "linear_sweep.yaml"], 
+    ["wandb", "sweep", "sweep.yaml"], 
     capture_output=True, 
     text=True
 )
