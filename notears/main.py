@@ -44,7 +44,7 @@ import argparse
 def get_args(debug):
     parser = argparse.ArgumentParser('parameters')
 
-    parser.add_argument('--seed', type=int, default=1, 
+    parser.add_argument('--seed', type=int, default=18, 
                         help='seed for repeatable results')
     parser.add_argument('--n', default=1000, type=int,
                         help='the number of dataset')
@@ -218,6 +218,7 @@ def main():
         print_input = "[iteration {:03d}]".format(iteration)
         print_input += ''.join([', {}: {:.4f}'.format(x, np.mean(y).round(2)) for x, y in logs.items()])
         print_input += ', h(W): {:.8f}'.format(h)
+        print_input += ', rho: {:.4f}'.format(rho)
         print(print_input)
         
         """update log"""

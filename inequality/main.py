@@ -4,6 +4,7 @@ os.chdir(os.path.dirname(os.path.abspath(__file__)))
 #%%
 import numpy as np
 import pandas as pd
+import tqdm
 
 import torch
 
@@ -57,31 +58,29 @@ def get_args(debug):
     parser.add_argument('--sem_type', type=str, default='gauss',
                         help='sem type: gauss, exp, gumbel, uniform, logistic, poisson')
 
-    parser.add_argument('--rho', default=1, type=float,
-                        help='rho')
-    parser.add_argument('--alpha', default=0, type=float,
-                        help='alpha')
-    parser.add_argument('--h', default=np.inf, type=float,
-                        help='h')
+    parser.add_argument('--t', default=0.01, type=float,
+                        help='t')
+    parser.add_argument('--mu', default=5, type=float,
+                        help='mu')
+    parser.add_argument('--delta', default=1, type=float,
+                        help='delta')
     
     parser.add_argument('--lr', default=0.001, type=float,
                         help='learning rate')
-    parser.add_argument('--loss_type', type=str, default='l2',
-                        help='loss type')
     parser.add_argument('--max_iter', default=100, type=int,
                         help='maximum iteration')
-    parser.add_argument('--h_tol', default=1e-8, type=float,
-                        help='h value tolerance')
+    parser.add_argument('--max_epoch', default=10000, type=int,
+                        help='maximum iteration')
+    parser.add_argument('--tol', default=1e-2, type=float,
+                        help='tolerance')
+    parser.add_argument('--w_tol', default=1e-2, type=float,
+                        help='w value tolerance')
     parser.add_argument('--w_threshold', default=0.3, type=float,
                         help='weight adjacency matrix threshold')
-    parser.add_argument('--lambda', default=0.01, type=float,
+    parser.add_argument('--lambda', default=0.1, type=float,
                         help='weight of LASSO regularization')
-    parser.add_argument('--progress_rate', default=0.25, type=float,
-                        help='progress rate')
-    parser.add_argument('--rho_max', default=1e+16, type=float,
-                        help='rho max')
-    parser.add_argument('--rho_rate', default=2, type=float,
-                        help='rho rate')
+    
+    parser.add_argument('--fig_show', default=True, type=bool)
 
     if debug:
         return parser.parse_args(args=[])
@@ -116,29 +115,27 @@ def h_fun(W):
     h = trace_expm(W * W) - W.shape[0]
     return h
 
-def loss_function(X, W_est, alpha, rho, config):
-    """Evaluate value and gradient of augmented Lagrangian."""
+def loss_function(X, W_est, t, config):
+    """centering step"""
     loss_ = []
     
-    R = X - X.matmul(W_est)
-    recon = 0.5 / config["n"] * (R ** 2).sum()
+    recon = 0.5 / config["n"] * torch.sum(torch.pow(X - X.matmul(W_est), 2))
     loss_.append(('recon', recon))
     
     L1 = config["lambda"] * torch.norm(W_est, p=1)
     loss_.append(('L1', L1))
     
     h = h_fun(W_est)
-    aug = 0.5 * rho * (h ** 2)
-    aug += alpha * h
-    loss_.append(('aug', aug))
+    log_barrier = - torch.log(- h + config["delta"])
+    loss_.append(('log_barrier', log_barrier))
         
-    loss = sum([y for _, y in loss_])
+    loss = t * (recon + L1) + log_barrier
     loss_.append(('loss', loss))
     
     return loss, loss_
 #%%
 # def main():
-config = vars(get_args(debug=False)) # default configuration
+config = vars(get_args(debug=True)) # default configuration
 wandb.config.update(config)
 
 '''simulate DAG and weighted adjacency matrix'''
@@ -147,13 +144,11 @@ B_true = simulate_dag(config["d"], config["s0"], config["graph_type"])
 W_true = simulate_parameter(B_true)
 
 wandb.run.summary['W_true'] = wandb.Table(data=pd.DataFrame(W_true))
-fig = viz_graph(W_true, size=(7, 7))
-# wandb.run.summary['Graph'] = wandb.Image(fig)
+fig = viz_graph(W_true, size=(7, 7), show=config["fig_show"])
 wandb.log({'Graph': wandb.Image(fig)})
-fig = viz_heatmap(W_true, size=(5, 4))
+fig = viz_heatmap(W_true, size=(5, 4), show=config["fig_show"])
 wandb.log({'heatmap': wandb.Image(fig)})
-# wandb.run.summary['heatmap'] = wandb.Image(fig)
-
+#%%
 '''simulate dataset'''
 X = simulate_linear_sem(W_true, config["n"], config["sem_type"], normalize=True)
 n, d = X.shape
@@ -163,80 +158,79 @@ wandb.run.summary['data'] = wandb.Table(data=pd.DataFrame(X))
 
 '''optimization process'''
 X = torch.FloatTensor(X)
+#%%
+"""barrier method"""
+m = 1. # number of inequality constraints
+t = config["t"] # initial value
 
+# strictly feasible weighted adjacency matrix
 W_est = torch.zeros((config["d"], config["d"]), 
                     requires_grad=True)
-
-# initial values
-rho = config["rho"]
-alpha = config["alpha"]
-h = config["h"]
+W_est_old = None
 
 optimizer = torch.optim.Adam([W_est], lr=config["lr"])
-
+#%%
 for iteration in range(config["max_iter"]):
-    """Perform one step of dual ascent in augmented Lagrangian."""
-    
     logs = {
         'loss': [], 
         'recon': [],
         'L1': [],
-        'aug': [],
+        'log_barrier': [],
     }
     
-    """primal update"""
-    h_old = np.inf
-    while rho < config["rho_max"]:
-        while True:
-            optimizer.zero_grad()
-            loss, loss_ = loss_function(X, W_est, alpha, rho, config)
-            loss.backward()
-            optimizer.step()
-            
-            """stopping rule: no change in weight estimation (convergence)"""
-            with torch.no_grad():
-                h_new = h_fun(W_est).item()
-            if abs(h_old - h_new) < 1e-8: 
-                break
-            h_old = h_new
-    
-        """accumulate losses"""
-        for x, y in loss_:
-            logs[x] = logs.get(x) + [y.item()]
+    with torch.no_grad():
+        W_est_old = W_est.detach().clone()
         
-        with torch.no_grad():
-            h_new = h_fun(W_est).item()
-        if h_new > config["progress_rate"] * h:
-            rho *= config["rho_rate"]
-        else:
-            break
+        slin.expm(W_est.detach().numpy())
     
-    """dual ascent step"""
-    h = h_new
-    alpha += rho * h
+    # with tqdm.tqdm(total=config["max_epoch"]) as pbar:
+    # while True:
+    for _ in tqdm.tqdm(range(config["max_epoch"])):
+        optimizer.zero_grad()
+        loss, loss_ = loss_function(X, W_est, t, config)
+        loss.backward()
+        optimizer.step()
+        
+        # pbar.update(1)
+        
+        """inner stopping rule: no change in weight estimation (convergence)"""
+        with torch.no_grad():
+            h = h_fun(W_est).item()
+            w_change = torch.sum(torch.abs(W_est_old - W_est)).item()
+        if w_change < config["w_tol"]: 
+            break
+        else:
+            W_est_old = W_est.detach().clone()
+
+    """accumulate losses"""
+    for x, y in loss_:
+        logs[x] = logs.get(x) + [y.item()]
     
     print_input = "[iteration {:03d}]".format(iteration)
     print_input += ''.join([', {}: {:.4f}'.format(x, np.mean(y).round(2)) for x, y in logs.items()])
     print_input += ', h(W): {:.8f}'.format(h)
+    print_input += ', t: {:.1f}'.format(t)
     print(print_input)
     
     """update log"""
     wandb.log({x : np.mean(y) for x, y in logs.items()})
     wandb.log({'h(W)' : h})
+    wandb.log({'t' : t})
     
-    """stopping rule"""
-    if h <= config["h_tol"] or rho >= config["rho_max"]:
+    """stopping criterion"""
+    if m/t < config["tol"]:
         break
-    
+    else:
+        t = config["mu"] * t
+#%%
 """chech DAGness of estimated weighted graph"""
-W_est = W_est.detach().numpy().astype(float).round(2)
+W_est = W_est.detach().numpy().astype(float)
 W_est[np.abs(W_est) < config["w_threshold"]] = 0.
+W_est = W_est.round(2)
 
-fig = viz_graph(W_est, size=(7, 7))
-# wandb.run.summary['Graph_est'] = wandb.Image(fig)
+fig = viz_graph(W_est, size=(7, 7), show=config["fig_show"])
 wandb.log({'Graph_est': wandb.Image(fig)})
-fig = viz_heatmap(W_est, size=(5, 4))
-# wandb.run.summary['heatmap_est'] = wandb.Image(fig)
+fig = viz_heatmap(W_est, size=(5, 4), show=config["fig_show"])
 wandb.log({'heatmap_est': wandb.Image(fig)})
 
 wandb.run.summary['Is DAG?'] = is_dag(W_est)
@@ -247,15 +241,14 @@ W_ = (W_true != 0).astype(float)
 W_est_ = (W_est != 0).astype(float)
 W_diff_ = np.abs(W_ - W_est_)
 
-fig = viz_graph(W_diff_, size=(7, 7))
-# wandb.run.summary['Graph_diff'] = wandb.Image(fig)
+fig = viz_graph(W_diff_, size=(7, 7), show=config["fig_show"])
 wandb.log({'Graph_diff': wandb.Image(fig)})
 
 """accuracy"""
 B_est = (W_est != 0).astype(float)
 acc = count_accuracy(B_true, B_est)
 wandb.log(acc)
-
+#%%
 wandb.run.finish()
 #%%
 # if __name__ == '__main__':
