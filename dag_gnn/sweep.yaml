@@ -1,13 +1,15 @@
-project: (causal)DAG-GNN-sweep
+project: (causal)DAG-GNN
 program: main.py
 method: grid
 metric:
   goal: minimize
   name: loss
 parameters:
-  lr:
-    values: [0.001, 0.002, 0.003]
-  lambda:
-    values: [0.001, 0.002]
-  rho_rate:
-    values: [1.1, 1.5, 2, 10]
+  seed:
+    values: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+  # lr:
+  #   values: [0.001, 0.002, 0.003]
+  # lambda:
+  #   values: [0.001, 0.002]
+  # rho_rate:
+  #   values: [1.1, 1.5, 2, 10]
