@@ -41,7 +41,7 @@ except:
 wandb.init(
     project="(causal)NOTEARS-MLP", 
     entity="anseunghwan",
-    tags=["notears", "linear"],
+    tags=["non-linear"],
     # name='notears'
 )
 #%%
@@ -66,7 +66,7 @@ def get_args(debug):
                         help='expected number of edges')
     parser.add_argument('--graph_type', type=str, default='ER',
                         help='graph type: ER, SF, BP')
-    parser.add_argument('--sem_type', type=str, default='mlp',
+    parser.add_argument('--sem_type', type=str, default='mim',
                         help='sem type: mlp, mim, gp, gp-add')
 
     parser.add_argument('--rho', default=1, type=float,
@@ -87,9 +87,9 @@ def get_args(debug):
                         help='maximum iteration')
     parser.add_argument('--h_tol', default=1e-8, type=float,
                         help='h value tolerance')
-    parser.add_argument('--w_threshold', default=0.1, type=float,
+    parser.add_argument('--w_threshold', default=0.2, type=float,
                         help='weight adjacency matrix threshold')
-    parser.add_argument('--lambda1', default=0.01, type=float,
+    parser.add_argument('--lambda1', default=0.005, type=float,
                         help='weight of LASSO regularization')
     parser.add_argument('--lambda2', default=0.001, type=float,
                         help='weight of Ridge regularization')
