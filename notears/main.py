@@ -74,7 +74,7 @@ def get_args(debug):
                         help='h value tolerance')
     parser.add_argument('--w_threshold', default=0.3, type=float,
                         help='weight adjacency matrix threshold')
-    parser.add_argument('--lambda', default=0.01, type=float,
+    parser.add_argument('--lambda', default=0.1, type=float,
                         help='weight of LASSO regularization')
     parser.add_argument('--progress_rate', default=0.25, type=float,
                         help='progress rate')

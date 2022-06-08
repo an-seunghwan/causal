@@ -1,5 +1,5 @@
-project: (causal)NOTEARS
-program: main.py
+project: (causal)proposals
+program: mcp.py
 method: grid
 metric:
   goal: minimize
