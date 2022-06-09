@@ -33,10 +33,21 @@ from tqdm import tqdm
 from copy import deepcopy
 from itertools import combinations
 from scipy.special import expit as sigmoid
+import igraph as ig
 #%%
 def set_random_seed(seed):
     random.seed(seed)
     np.random.seed(seed)
+#%%
+def is_dag(W: np.ndarray):
+    """check DAGness
+    Args:
+        W: weight matrix of graph
+    Returns:
+        Boolean: True if W is weight matrix of DAG
+    """
+    G = ig.Graph.Weighted_Adjacency(W.tolist())
+    return G.is_dag()
 #%%
 class DAG(object):
     '''

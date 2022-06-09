@@ -11,8 +11,8 @@ import torch
 from utils.simulation import (
     set_random_seed,
     is_dag,
-    load_data,
-    count_accuracy
+    DAG,
+    IIDSimulation
 )
 
 from utils.viz import (
@@ -20,11 +20,11 @@ from utils.viz import (
     viz_heatmap,
 )
 
-from utils.model import (
-    GAE
-)
+# from utils.model import (
+#     GAE
+# )
 
-from utils.trac_exp import trace_expm
+# from utils.trac_exp import trace_expm
 #%%
 import sys
 import subprocess
@@ -38,7 +38,7 @@ except:
     import wandb
 
 wandb.init(
-    project="(causal)GAE", 
+    project="(causal)MCSL", 
     entity="anseunghwan",
     tags=["nonlinear"],
 )
@@ -47,110 +47,69 @@ import argparse
 def get_args(debug):
     parser = argparse.ArgumentParser('parameters')
 
-    parser.add_argument('--seed', type=int, default=3, 
+    parser.add_argument('--seed', type=int, default=1, 
                         help='seed for repeatable results')
-    parser.add_argument('--data_type', type=str, default='synthetic',
-                        help='types of data: synthetis, discrete, real')
-    parser.add_argument('--n', default=5000, type=int,
+    parser.add_argument('--n', default=1000, type=int,
                         help='the number of dataset')
     parser.add_argument('--d', default=10, type=int,
                         help='the number of nodes')
-    parser.add_argument('--degree', default=2, type=int,
+    parser.add_argument('--s0', default=15, type=int,
                         help='expected number of edges')
     parser.add_argument('--graph_type', type=str, default='ER',
                         help='graph type: ER, SF, BP')
-    parser.add_argument('--sem_type', type=str, default='gauss',
-                        help='sem type: gauss, exp, gumbel, uniform, logistic, poisson')
-    parser.add_argument('--nonlinear_type', type=str, default='nonlinear_1',
-                        help='nonlinear causal structure type: nonlinear_1, nonlinear_2')
+    parser.add_argument('--sem_type', type=str, default='gp',
+                        help='sem type for linear method: gauss, exp, gumbel, uniform, logistic'
+                            'sem type for nonlinear method: mlp, mim, gp, gp-add')
+    parser.add_argument('--method', type=str, default='nonlinear',
+                        help='causal structure type: linear, nonlinear')
 
-    parser.add_argument('--rho', default=1, type=float,
+    parser.add_argument('--model_type', type=str, default='nn',
+                        help='nn denotes neural network, qr denotes quatratic regression.') # qr is not suppored yet
+    parser.add_argument("--num_layer", default=4, type=int,
+                        help="Number of hidden layer in neural network when model_type is nn")
+    parser.add_argument("--hidden_dim", default=16, type=int,
+                        help="Number of hidden dimension in hidden layer, when model_type is nn")
+    
+    parser.add_argument('--max_iter', default=25, type=int,
+                        help='maximum number of iteration')
+    parser.add_argument('--epochs', default=1000, type=int,
+                        help='maximum iteration')
+    parser.add_argument('--batch_size', default=100, type=int,
+                        help='batch size')
+    parser.add_argument('--lr', default=0.002, type=float,
+                        help='learning rate')
+    parser.add_argument('--init_iter', default=2, type=int,
+                        help='Initial iteration to disallow early stopping')
+    parser.add_argument('--lambda', default=2e-3, type=float,
+                        help='coefficient of LASSO penalty')
+    
+    parser.add_argument('--rho', default=1e-5, type=float,
                         help='rho')
+    parser.add_argument('--rho_max', default=1e+14, type=float,
+                        help='maximum rho value')
+    parser.add_argument('--rho_rate', default=10, type=float,
+                        help='Multiplication to amplify rho each time')
     parser.add_argument('--alpha', default=0, type=float,
                         help='alpha')
     parser.add_argument('--h', default=np.inf, type=float,
                         help='h')
     
-    parser.add_argument("--hidden_dim", default=16, type=int,
-                        help="hidden dimensions for MLP")
-    parser.add_argument("--num_layer", default=2, type=int,
-                        help="hidden dimensions for MLP")
-    parser.add_argument("--x_dim", default=1, type=int,
-                        help="dimension of each node")
-    parser.add_argument("--latent_dim", default=1, type=int,
-                        help="dimension of each latent node")
-    
-    parser.add_argument('--epochs', default=300, type=int,
-                        help='maximum iteration')
-    parser.add_argument('--batch_size', default=100, type=int,
-                        help='batch size')
-    parser.add_argument('--lr', default=0.003, type=float,
-                        help='learning rate')
-    parser.add_argument('--init_iter', default=5, type=int,
-                        help='initial iteration')
-    parser.add_argument('--early_stopping', type=bool, default=True,
-                        help='if True, early stopping')
-    parser.add_argument('--early_stopping_threshold', default=1.15, type=float,
-                        help='early stopping threshold')
-    
-    parser.add_argument('--max_iter', default=20, type=int,
-                        help='maximum number of iteration')
-    parser.add_argument('--h_tol', default=1e-12, type=float,
+    parser.add_argument('--h_tol', default=1e-10, type=float,
                         help='h value tolerance')
-    parser.add_argument('--w_threshold', default=0.2, type=float,
-                        help='threshold for weighted adjacency matrix')
-    parser.add_argument('--lambda', default=0, type=float,
-                        help='coefficient of LASSO penalty')
+    parser.add_argument('--w_threshold', default=0.5, type=float,
+                        help='Threshold used to determine whether has edge in graph, element greater'
+                            'than the w_threshold means has a directed edge, otherwise has not.')
     parser.add_argument('--progress_rate', default=0.25, type=float,
                         help='progress rate')
-    parser.add_argument('--rho_max', default=1e+18, type=float,
-                        help='maximum rho value')
-    parser.add_argument('--rho_rate', default=10, type=float,
-                        help='rho rate')
+    parser.add_argument('--temperature', default=0.2, type=float,
+                        help='Temperature for gumbel sigmoid')
     
-    parser.add_argument('--fig_show', default=False, type=bool)
+    parser.add_argument('--fig_show', default=True, type=bool)
 
     if debug:
         return parser.parse_args(args=[])
     else:    
         return parser.parse_args()
-    
-# config = {
-#     "seed": 3,
-#     'data_type': 'synthetic', # discrete, real
-#     "n": 5000,
-#     "d": 10,
-#     "degree": 2,
-#     "graph_type": "ER",
-#     "sem_type": "gauss",
-#     "nonlinear_type": "nonlinear_1",
-#     "hidden_dim": 16,
-#     "num_layer": 2,
-#     "x_dim": 1,
-#     "latent_dim": 1,
-    
-#     "epochs": 300,
-#     "batch_size": 100,
-#     "lr": 0.003,
-#     "init_iter": 5,
-#     "early_stopping": True,
-#     "early_stopping_threshold": 1.15,
-    
-#     "rho": 1, # initial value
-#     "alpha": 0., # initial value
-#     "h": np.inf, # initial value
-    
-#     "max_iter": 20, 
-#     "loss_type": 'l2',
-#     "h_tol": 1e-12, 
-#     "w_threshold": 0.2,
-#     "lambda": 0.,
-#     "progress_rate": 0.25,
-#     "rho_max": 1e+18, 
-#     "rho_rate": 10,
-    
-#     "fig_show": False,
-# }
 #%%
 def h_fun(W):
     """Evaluate DAGness constraint"""
@@ -207,7 +166,7 @@ def train(train_loader, model, rho, alpha, config, optimizer):
     return logs
 #%%
 def main():
-    config = vars(get_args(debug=False)) # default configuration
+    config = vars(get_args(debug=True)) # default configuration
     config["cuda"] = torch.cuda.is_available()
     wandb.config.update(config)
     
@@ -215,8 +174,24 @@ def main():
     torch.manual_seed(config["seed"])
     if config["cuda"]:
         torch.cuda.manual_seed(config["seed"])
-    train_loader, W_true = load_data(config)
-
+    
+    """load dataset"""    
+    dag_simulator = DAG()
+    W_true = dag_simulator.erdos_renyi(
+            n_nodes=config["d"],
+            n_edges=config["s0"],
+            weight_range=(0.5, 2.0)
+    )
+    W_true = (W_true != 0).astype(int)
+    iid_simulator = IIDSimulation(
+        W_true, 
+        n=config["n"], 
+        method=config["method"], 
+        sem_type=config["sem_type"]
+    )
+    X = iid_simulator.X
+    X = torch.FloatTensor(X)
+    
     wandb.run.summary['W_true'] = wandb.Table(data=pd.DataFrame(W_true))
     fig = viz_graph(W_true, size=(7, 7), show=config["fig_show"])
     wandb.log({'Graph': wandb.Image(fig)})
