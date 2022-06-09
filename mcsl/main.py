@@ -75,7 +75,7 @@ def get_args(debug):
                         help='maximum iteration')
     parser.add_argument('--batch_size', default=100, type=int,
                         help='batch size')
-    parser.add_argument('--lr', default=0.002, type=float,
+    parser.add_argument('--lr', default=0.03, type=float,
                         help='learning rate')
     parser.add_argument('--init_iter', default=2, type=int,
                         help='Initial iteration to disallow early stopping')
@@ -230,7 +230,7 @@ def main():
         
         """dual ascent"""
         h = h_new.detach().item()
-        alpha += rho * h.item()
+        alpha += rho * h
         
         print_input = "[iteration {:03d}]".format(iteration)
         print_input += ''.join([', {}: {:.4f}'.format(x, np.mean(y).round(2)) for x, y in logs.items()])
