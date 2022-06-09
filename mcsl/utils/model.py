@@ -51,7 +51,7 @@ class MCSL(nn.Module):
         for i in range(self.config["d"]):
             mask = w_prime[:, i].unsqueeze(dim=0)
             xhat.append(self.nets[str(i)](input * mask))
-        return torch.cat(xhat, dim=1)
+        return torch.cat(xhat, dim=1), w_prime
 #%%
 def main():
     config = {

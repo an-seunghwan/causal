@@ -12,7 +12,8 @@ from utils.simulation import (
     set_random_seed,
     is_dag,
     DAG,
-    IIDSimulation
+    IIDSimulation,
+    count_accuracy
 )
 
 from utils.viz import (
@@ -20,11 +21,9 @@ from utils.viz import (
     viz_heatmap,
 )
 
-# from utils.model import (
-#     GAE
-# )
-
-# from utils.trac_exp import trace_expm
+from utils.model import (
+    MCSL
+)
 #%%
 import sys
 import subprocess
@@ -111,59 +110,41 @@ def get_args(debug):
     else:    
         return parser.parse_args()
 #%%
-def h_fun(W):
-    """Evaluate DAGness constraint"""
-    h = trace_expm(W * W) - W.shape[0]
-    return h
-#%%
-def train(train_loader, model, rho, alpha, config, optimizer):
+def h_function(w, config):
+    h_A = torch.trace(torch.matrix_exp(w * w)) - config["d"]
+    return h_A
+
+def loss_function(X, model, rho, alpha, config):
     model.train()
     
-    if config["cuda"]:
-        X = X.cuda()
+    loss_ = {}
     
-    logs = {
-        'loss': [], 
-        'recon': [],
-        'L1': [],
-        'aug': [],
-    }
+    recon, w_prime = model(X)
     
-    for batch_num, [train_batch] in enumerate(train_loader):
-        if config["cuda"]:
-            train_batch = train_batch.cuda()
-            
-        optimizer.zero_grad()
-        
-        recon = model(train_batch)
-        
-        loss_ = []
-        
-        # reconstruction
-        recon = 0.5 * torch.pow(recon - train_batch, 2).sum() / train_batch.size(0)
-        loss_.append(('recon', recon))
+    # reconstruction
+    recon = 0.5 / config["n"] * torch.pow(recon - X, 2).sum() 
+    loss_['recon'] = recon
 
-        # sparsity loss
-        L1 = config["lambda"] * torch.sum(torch.abs(model.W))
-        loss_.append(('L1', L1))
+    # sparsity loss
+    L1 = config["lambda"] * torch.linalg.norm(w_prime, ord=1)
+    loss_['L1'] = L1
 
-        # augmentation and lagrangian loss
-        h_A = h_fun(model.W)
-        aug = 0.5 * rho * (h_A ** 2)
-        aug += alpha * h_A
-        loss_.append(('aug', aug))
-        
-        loss = sum([y for _, y in loss_])
-        loss_.append(('loss', loss))
-        
-        loss.backward()
-        optimizer.step()
-        
-        """accumulate losses"""
-        for x, y in loss_:
-            logs[x] = logs.get(x) + [y.item()]
+    # augmentation and lagrangian loss
+    """Evaluate DAGness constraint"""
+    h_A = h_function(w_prime, config)
+    aug = 0.5 * rho * (h_A ** 2)
+    aug += alpha * h_A
+    loss_['aug'] = aug
     
-    return logs
+    loss = sum([y for _, y in loss_.items()])
+    loss_['loss'] = loss
+    
+    return loss, loss_, h_A
+#%%
+def convert_logits_to_sigmoid(w, tau, config):
+    sigmoid_w = torch.sigmoid(w / tau)
+    sigmoid_w = sigmoid_w * (1. - torch.eye(config["d"]))
+    return sigmoid_w
 #%%
 def main():
     config = vars(get_args(debug=True)) # default configuration
@@ -191,6 +172,8 @@ def main():
     )
     X = iid_simulator.X
     X = torch.FloatTensor(X)
+    if config["cuda"]:
+        X = X.cuda()
     
     wandb.run.summary['W_true'] = wandb.Table(data=pd.DataFrame(W_true))
     fig = viz_graph(W_true, size=(7, 7), show=config["fig_show"])
@@ -198,7 +181,7 @@ def main():
     fig = viz_heatmap(W_true, size=(5, 4), show=config["fig_show"])
     wandb.log({'heatmap': wandb.Image(fig)})
     
-    model = GAE(config)
+    model = MCSL(config)
 
     if config["cuda"]:
         model.cuda()
@@ -211,89 +194,75 @@ def main():
     rho = config["rho"]
     alpha = config["alpha"]
     h = config["h"]
-    mse_save = np.inf
-    W_save = None
         
     for iteration in range(config["max_iter"]):
+        logs = {
+            'loss': [], 
+            'recon': [],
+            'L1': [],
+            'aug': [],
+        }
         
         """primal problem"""
         while rho < config["rho_max"]:
-            # h_old = np.inf
             # find argmin of primal problem (local solution) = update for config["epochs"] times
             for epoch in tqdm.tqdm(range(config["epochs"]), desc="primal update"):
-                logs = train(train_loader, model, rho, alpha, config, optimizer)
+                optimizer.zero_grad()
+                loss, loss_, h_new = loss_function(X, model, rho, alpha, config)
+                loss.backward()
+                optimizer.step()
                 
-                # """FIXME"""
-                # W_est = model.W.detach().data.clone()
-                # h_new = h_fun(W_est).item()
-                # # no change in weight estimation (convergence)
-                # if abs(h_old - h_new) < 1e-12: 
-                #     break
-                # h_old = h_new
+                """accumulate losses"""
+                for x, y in loss_.items():
+                    logs[x] = logs.get(x) + [y.item()]
                 
-            # only one epoch is fine for finding argmin
-            # logs = train(model, X, rho, alpha, config, optimizer)
-            
-            W_est = model.W.detach().data.clone()
-            h_current = h_fun(W_est)
-            if h_current.item() > config["progress_rate"] * h:
+            if h_new.item() > config["progress_rate"] * h:
                 rho *= config["rho_rate"]
             else:
                 break
         
-        if config["early_stopping"]:
-            if np.mean(logs['recon']) / mse_save > config["early_stopping_threshold"] and h_current.item() <= 1e-7:
-                W_est = W_save
-                print("early stopping!")
-                break
-            else:
-                W_save = W_est
-                mse_save = np.mean(logs['recon'])
+        sigmoid_w = convert_logits_to_sigmoid(model.w.detach(), config["temperature"], config)
+        h_logit = h_function(sigmoid_w, config)
+        
+        """stopping rule"""
+        if h_new.item() <= config["h_tol"] and iteration > config["init_iter"]:
+            break
         
         """dual ascent"""
-        h = h_current.item()
-        alpha += rho * h_current.item()
+        h = h_new.detach().item()
+        alpha += rho * h.item()
         
         print_input = "[iteration {:03d}]".format(iteration)
         print_input += ''.join([', {}: {:.4f}'.format(x, np.mean(y).round(2)) for x, y in logs.items()])
         print_input += ', h(W): {:.8f}'.format(h)
+        print_input += ', h(W_logit): {:.8f}'.format(h_logit)
         print(print_input)
         
         """update log"""
         wandb.log({x : np.mean(y) for x, y in logs.items()})
         wandb.log({'h(W)' : h})
-        
-        """stopping rule"""
-        if h_current.item() <= config["h_tol"] and iteration > config["init_iter"]:
-            break
+        wandb.log({'h(W_logit)' : h_logit})
     
     """final metrics"""
-    W_est = W_est.numpy()
-    W_est = W_est / np.max(np.abs(W_est)) # normalize weighted adjacency matrix
-    W_est[np.abs(W_est) < config["w_threshold"]] = 0.
-    W_est = W_est.astype(float).round(2)
-
-    fig = viz_graph(W_est, size=(7, 7), show=config["fig_show"])
+    w_est = convert_logits_to_sigmoid(model.w.detach(), config["temperature"], config)
+    w_est[w_est <= config["w_threshold"]] = 0
+    w_est[w_est > config["w_threshold"]] = 1
+    w_est[np.arange(config["d"]), np.arange(config["d"])] = 0
+    w_est = w_est.numpy()
+    
+    fig = viz_graph(w_est, size=(7, 7), show=config["fig_show"])
     wandb.log({'Graph_est': wandb.Image(fig)})
-    fig = viz_heatmap(W_est, size=(5, 4), show=config["fig_show"])
+    fig = viz_heatmap(w_est, size=(5, 4), show=config["fig_show"])
     wandb.log({'heatmap_est': wandb.Image(fig)})
 
-    wandb.run.summary['Is DAG?'] = is_dag(W_est)
-    wandb.run.summary['W_est'] = wandb.Table(data=pd.DataFrame(W_est))
-    wandb.run.summary['W_diff'] = wandb.Table(data=pd.DataFrame(W_true - W_est))
-
-    W_ = (W_true != 0).astype(float)
-    W_est_ = (W_est != 0).astype(float)
-    W_diff_ = np.abs(W_ - W_est_)
-
-    fig = viz_graph(W_diff_, size=(7, 7))
+    wandb.run.summary['Is DAG?'] = is_dag(w_est)
+    wandb.run.summary['w_est'] = wandb.Table(data=pd.DataFrame(w_est))
+    fig = viz_graph(W_true - w_est, size=(7, 7), show=config["fig_show"])
     wandb.log({'Graph_diff': wandb.Image(fig)})
-
-    B_est = (W_est != 0).astype(float)
-    B_true = (W_true != 0).astype(float)
+    wandb.run.summary['W_diff'] = wandb.Table(data=pd.DataFrame(W_true - w_est))
 
     """accuracy"""
-    acc = count_accuracy(B_true, B_est)
+    acc = count_accuracy(W_true, w_est)
     wandb.log(acc)
     
     wandb.run.finish()
