@@ -224,6 +224,17 @@ def main():
         sigmoid_w = convert_logits_to_sigmoid(model.w.detach(), config["temperature"], config)
         h_logit = h_function(sigmoid_w, config)
         
+        print_input = "[iteration {:03d}]".format(iteration)
+        print_input += ''.join([', {}: {:.4f}'.format(x, np.mean(y).round(2)) for x, y in logs.items()])
+        print_input += ', h(W): {:.8f}'.format(h_new.item())
+        print_input += ', h(W_logit): {:.8f}'.format(h_logit.item())
+        print(print_input)
+        
+        """update log"""
+        wandb.log({x : np.mean(y) for x, y in logs.items()})
+        wandb.log({'h(W)' : h_new.item()})
+        wandb.log({'h(W_logit)' : h_logit.item()})
+        
         """stopping rule"""
         if h_new.item() <= config["h_tol"] and iteration > config["init_iter"]:
             break
@@ -231,17 +242,6 @@ def main():
         """dual ascent"""
         h = h_new.detach().item()
         alpha += rho * h
-        
-        print_input = "[iteration {:03d}]".format(iteration)
-        print_input += ''.join([', {}: {:.4f}'.format(x, np.mean(y).round(2)) for x, y in logs.items()])
-        print_input += ', h(W): {:.8f}'.format(h)
-        print_input += ', h(W_logit): {:.8f}'.format(h_logit)
-        print(print_input)
-        
-        """update log"""
-        wandb.log({x : np.mean(y) for x, y in logs.items()})
-        wandb.log({'h(W)' : h})
-        wandb.log({'h(W_logit)' : h_logit})
     
     """final metrics"""
     w_est = convert_logits_to_sigmoid(model.w.detach(), config["temperature"], config)

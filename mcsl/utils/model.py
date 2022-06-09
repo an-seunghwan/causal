@@ -26,7 +26,7 @@ class MCSL(nn.Module):
         self.tau = config["temperature"]
 
         w = torch.nn.init.uniform_(torch.Tensor(config["d"], config["d"]),
-                                a=-1e-10, b=1e-10)
+                                    a=-1e-10, b=1e-10)
         self.w = torch.nn.Parameter(w)
 
     """remove all seed options"""
@@ -36,17 +36,17 @@ class MCSL(nn.Module):
         u[np.arange(shape[0]), np.arange(shape[0])] = 0 # set diagonal to zero
         return u
 
-    def gumbel_sigmoid(self, logits, tau):
+    def gumbel_sigmoid(self, logits):
         gumbel_softmax_sample = logits + self.sample_gumbel(logits.shape) - self.sample_gumbel(logits.shape)
         return torch.sigmoid(gumbel_softmax_sample / self.tau)
 
-    def _preprocess_graph(self, w, tau):
-        w_prob = self.gumbel_sigmoid(w, tau)
+    def _preprocess_graph(self, w):
+        w_prob = self.gumbel_sigmoid(w)
         w_prob = w_prob * (1. - torch.eye(w.shape[0])) # set diagonal to zeros
         return w_prob
 
     def forward(self, input):
-        w_prime = self._preprocess_graph(self.w, self.tau)
+        w_prime = self._preprocess_graph(self.w)
         xhat = []
         for i in range(self.config["d"]):
             mask = w_prime[:, i].unsqueeze(dim=0)
