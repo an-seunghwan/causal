@@ -48,19 +48,19 @@ def get_args(debug):
 
     parser.add_argument('--seed', type=int, default=1, 
                         help='seed for repeatable results')
-    parser.add_argument('--n', default=1000, type=int,
+    parser.add_argument('--n', default=2000, type=int,
                         help='the number of dataset')
     parser.add_argument('--d', default=10, type=int,
                         help='the number of nodes')
-    parser.add_argument('--s0', default=15, type=int,
+    parser.add_argument('--s0', default=20, type=int,
                         help='expected number of edges')
     parser.add_argument('--graph_type', type=str, default='ER',
                         help='graph type: ER, SF, BP')
-    parser.add_argument('--sem_type', type=str, default='gp',
-                        help='sem type for linear method: gauss, exp, gumbel, uniform, logistic'
-                            'sem type for nonlinear method: mlp, mim, gp, gp-add')
     parser.add_argument('--method', type=str, default='nonlinear',
                         help='causal structure type: linear, nonlinear')
+    parser.add_argument('--sem_type', type=str, default='mlp',
+                        help='sem type for linear method: gauss, exp, gumbel, uniform, logistic'
+                            'sem type for nonlinear method: mlp, mim, gp, gp-add')
 
     parser.add_argument('--model_type', type=str, default='nn',
                         help='nn denotes neural network, qr denotes quatratic regression.') # qr is not suppored yet
@@ -71,7 +71,7 @@ def get_args(debug):
     
     parser.add_argument('--max_iter', default=25, type=int,
                         help='maximum number of iteration')
-    parser.add_argument('--epochs', default=1000, type=int,
+    parser.add_argument('--epochs', default=100, type=int,
                         help='maximum iteration')
     parser.add_argument('--lr', default=0.03, type=float,
                         help='learning rate')
@@ -82,7 +82,7 @@ def get_args(debug):
     
     parser.add_argument('--rho', default=1e-5, type=float,
                         help='rho')
-    parser.add_argument('--rho_max', default=1e+14, type=float,
+    parser.add_argument('--rho_max', default=1e+20, type=float,
                         help='maximum rho value')
     parser.add_argument('--rho_rate', default=10, type=float,
                         help='Multiplication to amplify rho each time')
@@ -161,7 +161,6 @@ def main():
             n_edges=config["s0"],
             weight_range=(0.5, 2.0)
     )
-    W_true = (W_true != 0).astype(int)
     iid_simulator = IIDSimulation(
         W_true, 
         n=config["n"], 
@@ -172,6 +171,7 @@ def main():
     X = torch.FloatTensor(X)
     if config["cuda"]:
         X = X.cuda()
+    W_true = iid_simulator.B
     
     wandb.run.summary['W_true'] = wandb.Table(data=pd.DataFrame(W_true))
     fig = viz_graph(W_true, size=(7, 7), show=config["fig_show"])
