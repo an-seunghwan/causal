@@ -73,8 +73,6 @@ def get_args(debug):
                         help='maximum number of iteration')
     parser.add_argument('--epochs', default=1000, type=int,
                         help='maximum iteration')
-    parser.add_argument('--batch_size', default=100, type=int,
-                        help='batch size')
     parser.add_argument('--lr', default=0.03, type=float,
                         help='learning rate')
     parser.add_argument('--init_iter', default=2, type=int,
@@ -103,7 +101,7 @@ def get_args(debug):
     parser.add_argument('--temperature', default=0.2, type=float,
                         help='Temperature for gumbel sigmoid')
     
-    parser.add_argument('--fig_show', default=True, type=bool)
+    parser.add_argument('--fig_show', default=False, type=bool)
 
     if debug:
         return parser.parse_args(args=[])
@@ -147,7 +145,7 @@ def convert_logits_to_sigmoid(w, tau, config):
     return sigmoid_w
 #%%
 def main():
-    config = vars(get_args(debug=True)) # default configuration
+    config = vars(get_args(debug=False)) # default configuration
     config["cuda"] = torch.cuda.is_available()
     wandb.config.update(config)
     

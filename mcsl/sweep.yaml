@@ -7,13 +7,9 @@ metric:
 parameters:
   # seed:
   #   values: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+  num_layer:
+    values: [2, 3, 4]
   hidden_dim:
-    values: [[10], [10, 10]]
-  epochs:
-    values: [100, 300]
-  w_threshold:
-    values: [0.05, 0.1, 0.2]
-  lambda1:
-    values: [0.01, 0.005, 0.001]
-  lambda2:
-    values: [0.01, 0.005, 0.001]
+    values: [8, 16]
+  lambda:
+    values: [0.001, 0.005, 0.01]
