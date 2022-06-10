@@ -66,7 +66,7 @@ def get_args(debug):
                         help='nn denotes neural network, qr denotes quatratic regression.') # qr is not suppored yet
     parser.add_argument("--num_layer", default=4, type=int,
                         help="Number of hidden layer in neural network when model_type is nn")
-    parser.add_argument("--hidden_dim", default=16, type=int,
+    parser.add_argument("--hidden_dim", default=8, type=int,
                         help="Number of hidden dimension in hidden layer, when model_type is nn")
     
     parser.add_argument('--max_iter', default=25, type=int,
@@ -77,7 +77,7 @@ def get_args(debug):
                         help='learning rate')
     parser.add_argument('--init_iter', default=2, type=int,
                         help='Initial iteration to disallow early stopping')
-    parser.add_argument('--lambda', default=2e-3, type=float,
+    parser.add_argument('--lambda', default=0.001, type=float,
                         help='coefficient of LASSO penalty')
     
     parser.add_argument('--rho', default=1e-5, type=float,

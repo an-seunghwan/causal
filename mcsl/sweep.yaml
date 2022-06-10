@@ -5,11 +5,11 @@ metric:
   goal: minimize
   name: loss
 parameters:
-  # seed:
-  #   values: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
-  num_layer:
-    values: [2, 3, 4]
-  hidden_dim:
-    values: [8, 16]
-  lambda:
-    values: [0.001, 0.005, 0.01]
+  seed:
+    values: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+  # num_layer:
+  #   values: [2, 3, 4]
+  # hidden_dim:
+  #   values: [8, 16]
+  # lambda:
+  #   values: [0.001, 0.005, 0.01]
