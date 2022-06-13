@@ -66,8 +66,8 @@ def get_args(debug):
                         help='coefficient of DAG penalty')
     parser.add_argument('--equal_variances', default=True, type=bool,
                         help="Assume equal noise variances for likelibood objective.")
-    parser.add_argument('--non_equal_variances', default=False, type=bool,
-                        help="Assume non-equal noise variances for likelibood objective.")
+    # parser.add_argument('--non_equal_variances', default=False, type=bool,
+    #                     help="Assume non-equal noise variances for likelibood objective.")
     
     parser.add_argument('--lr', default=1e-3, type=float,
                         help='learning rate')
