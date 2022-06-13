@@ -8,6 +8,7 @@ This repository is unofficial implementation of following papers with pytorch. T
 - [Gradient-Based Neural DAG Learning](https://arxiv.org/pdf/1906.02226.pdf) (`gran_dag`)
 - [Learning Sparse Nonparametric DAGs](http://proceedings.mlr.press/v108/zheng20a/zheng20a.pdf) (`notears_mlp`)
 - [Masked Gradient-Based Causal Structure Learning](https://epubs.siam.org/doi/pdf/10.1137/1.9781611977172.48) (`mcsl`)
+- [On the Role of Sparsity and DAG Constraints for Learning Linear DAGs](https://proceedings.neurips.cc/paper/2020/file/d04d42cdf14579cd294e5079e0745411-Paper.pdf) (`golem`)
 
 ## Reference
 
@@ -16,3 +17,4 @@ This repository is unofficial implementation of following papers with pytorch. T
 - https://github.com/huawei-noah/trustworthyAI/tree/master/Causal_Structure_Learning/GAE_Causal_Structure_Learning
 - https://github.com/kurowasan/GraN-DAG
 - https://github.com/huawei-noah/trustworthyAI/tree/master/gcastle/castle/algorithms/gradient/mcsl
+- https://github.com/ignavierng/golem
