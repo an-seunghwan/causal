@@ -11,8 +11,7 @@ import torch
 from utils.simulation import (
     set_random_seed,
     is_dag,
-    DAG,
-    IIDSimulation,
+    SyntheticDataset,
     count_accuracy
 )
 
@@ -21,8 +20,8 @@ from utils.viz import (
     viz_heatmap,
 )
 
-from utils.model import (
-    MCSL
+from utils.util import (
+    postprocess
 )
 #%%
 import sys
@@ -37,9 +36,9 @@ except:
     import wandb
 
 wandb.init(
-    project="(causal)MCSL", 
+    project="(causal)GOLEM", 
     entity="anseunghwan",
-    tags=["nonlinear"],
+    tags=["linear"],
 )
 #%%
 import argparse
@@ -48,58 +47,36 @@ def get_args(debug):
 
     parser.add_argument('--seed', type=int, default=1, 
                         help='seed for repeatable results')
-    parser.add_argument('--n', default=2000, type=int,
+    parser.add_argument('--n', default=1000, type=int,
                         help='the number of dataset')
-    parser.add_argument('--d', default=10, type=int,
+    parser.add_argument('--d', default=20, type=int,
                         help='the number of nodes')
-    parser.add_argument('--s0', default=20, type=int,
-                        help='expected number of edges')
+    parser.add_argument('--degree', default=4, type=int,
+                        help='degree of graph')
     parser.add_argument('--graph_type', type=str, default='ER',
-                        help='graph type: ER, SF, BP')
-    parser.add_argument('--method', type=str, default='nonlinear',
-                        help='causal structure type: linear, nonlinear')
-    parser.add_argument('--sem_type', type=str, default='mlp',
-                        help='sem type for linear method: gauss, exp, gumbel, uniform, logistic'
-                            'sem type for nonlinear method: mlp, mim, gp, gp-add')
+                        help='graph type: ER or SF')
+    parser.add_argument('--noise_type', type=str, default='gaussian_ev',
+                        help='noise type: gaussian_ev, gaussian_nv, exponential, gumbel')
+    parser.add_argument('--B_scale', type=float, default=1,
+                        help='scaling factor for range of B')
 
-    parser.add_argument('--model_type', type=str, default='nn',
-                        help='nn denotes neural network, qr denotes quatratic regression.') # qr is not suppored yet
-    parser.add_argument("--num_layer", default=4, type=int,
-                        help="Number of hidden layer in neural network when model_type is nn")
-    parser.add_argument("--hidden_dim", default=8, type=int,
-                        help="Number of hidden dimension in hidden layer, when model_type is nn")
-    
-    parser.add_argument('--max_iter', default=25, type=int,
-                        help='maximum number of iteration')
-    parser.add_argument('--epochs', default=100, type=int,
-                        help='maximum iteration')
-    parser.add_argument('--lr', default=0.03, type=float,
-                        help='learning rate')
-    parser.add_argument('--init_iter', default=2, type=int,
-                        help='Initial iteration to disallow early stopping')
-    parser.add_argument('--lambda', default=0.002, type=float,
+    parser.add_argument('--lambda1', default=2e-2, type=float,
                         help='coefficient of LASSO penalty')
+    parser.add_argument('--lambda2', default=5, type=float,
+                        help='coefficient of DAG penalty')
+    parser.add_argument('--equal_variances', default=True, type=bool,
+                        help="Assume equal noise variances for likelibood objective.")
+    parser.add_argument('--non_equal_variances', default=False, type=bool,
+                        help="Assume non-equal noise variances for likelibood objective.")
     
-    parser.add_argument('--rho', default=1e-5, type=float,
-                        help='rho')
-    parser.add_argument('--rho_max', default=1e+20, type=float,
-                        help='maximum rho value')
-    parser.add_argument('--rho_rate', default=10, type=float,
-                        help='Multiplication to amplify rho each time')
-    parser.add_argument('--alpha', default=0, type=float,
-                        help='alpha')
-    parser.add_argument('--h', default=np.inf, type=float,
-                        help='h')
+    parser.add_argument('--lr', default=1e-3, type=float,
+                        help='learning rate')
+    parser.add_argument('--epochs', default=100000, type=int,
+                        help='number of iterations for training')
     
-    parser.add_argument('--h_tol', default=1e-10, type=float,
-                        help='h value tolerance')
-    parser.add_argument('--w_threshold', default=0.5, type=float,
+    parser.add_argument('--w_threshold', default=0.3, type=float,
                         help='Threshold used to determine whether has edge in graph, element greater'
                             'than the w_threshold means has a directed edge, otherwise has not.')
-    parser.add_argument('--progress_rate', default=0.25, type=float,
-                        help='progress rate')
-    parser.add_argument('--temperature', default=0.2, type=float,
-                        help='Temperature for gumbel sigmoid')
     
     parser.add_argument('--fig_show', default=False, type=bool)
 
@@ -112,37 +89,29 @@ def h_function(w, config):
     h_A = torch.trace(torch.matrix_exp(w * w)) - config["d"]
     return h_A
 
-def loss_function(X, model, rho, alpha, config):
-    model.train()
-    
+def loss_function(X, B_est, config):
     loss_ = {}
     
-    recon, w_prime = model(X)
+    if config["equal_variances"]:
+        nll = 0.5 * config["d"] * torch.log(torch.pow(X - X @ B_est, 2).sum())
+        nll -= torch.log(torch.abs(torch.linalg.det(torch.eye(config["d"]) - B_est)))
+    else: # non equal variances
+        nll = 0.5 * torch.log(torch.pow(X - X @ B_est, 2).sum(axis=0)).sum()
+        nll -= torch.log(torch.abs(torch.linalg.det(torch.eye(config["d"]) - B_est)))
+    loss_["nll"] = nll
     
-    # reconstruction
-    recon = 0.5 / config["n"] * torch.pow(recon - X, 2).sum() 
-    loss_['recon'] = recon
-
     # sparsity loss
-    L1 = config["lambda"] * torch.linalg.norm(w_prime, ord=1)
+    L1 = torch.linalg.norm(B_est, ord=1)
     loss_['L1'] = L1
 
-    # augmentation and lagrangian loss
     """Evaluate DAGness constraint"""
-    h_A = h_function(w_prime, config)
-    aug = 0.5 * rho * (h_A ** 2)
-    aug += alpha * h_A
-    loss_['aug'] = aug
+    h = h_function(B_est, config)
+    loss_['h'] = h
     
-    loss = sum([y for _, y in loss_.items()])
+    loss = nll + config["lambda1"] * L1 + config["lambda2"] * h
     loss_['loss'] = loss
     
-    return loss, loss_, h_A
-#%%
-def convert_logits_to_sigmoid(w, tau, config):
-    sigmoid_w = torch.sigmoid(w / tau)
-    sigmoid_w = sigmoid_w * (1. - torch.eye(config["d"]))
-    return sigmoid_w
+    return loss, loss_
 #%%
 def main():
     config = vars(get_args(debug=False)) # default configuration
@@ -154,113 +123,62 @@ def main():
     if config["cuda"]:
         torch.cuda.manual_seed(config["seed"])
     
-    """load dataset"""    
-    dag_simulator = DAG()
-    W_true = dag_simulator.erdos_renyi(
-            n_nodes=config["d"],
-            n_edges=config["s0"],
-            weight_range=(0.5, 2.0)
-    )
-    iid_simulator = IIDSimulation(
-        W_true, 
-        n=config["n"], 
-        method=config["method"], 
-        sem_type=config["sem_type"]
-    )
-    X = iid_simulator.X
+    """load dataset"""   
+    dataset = SyntheticDataset(config)
+    X = dataset.X
+    # center the dataset
+    X = X - X.mean(axis=0, keepdims=True)
     X = torch.FloatTensor(X)
     if config["cuda"]:
         X = X.cuda()
-    W_true = iid_simulator.B
+    B_true = dataset.B
+    B_bin_true = dataset.B_bin
     
-    wandb.run.summary['W_true'] = wandb.Table(data=pd.DataFrame(W_true))
-    fig = viz_graph(W_true, size=(7, 7), show=config["fig_show"])
+    wandb.run.summary['W_true'] = wandb.Table(data=pd.DataFrame(B_true))
+    fig = viz_graph(B_true.round(2), size=(7, 7), show=config["fig_show"])
     wandb.log({'Graph': wandb.Image(fig)})
-    fig = viz_heatmap(W_true, size=(5, 4), show=config["fig_show"])
+    fig = viz_heatmap(B_true.round(2), size=(5, 4), show=config["fig_show"])
     wandb.log({'heatmap': wandb.Image(fig)})
     
-    model = MCSL(config)
-
-    if config["cuda"]:
-        model.cuda()
-
-    optimizer = torch.optim.Adam(
-        model.parameters(), 
-        lr=config["lr"]
-    )
+    B_est = torch.zeros((config["d"], config["d"]), 
+                        requires_grad=True) # set diagonals to be zero
+    optimizer = torch.optim.Adam([B_est], lr=config["lr"])
     
-    rho = config["rho"]
-    alpha = config["alpha"]
-    h = config["h"]
+    for iteration in range(config["epochs"]):
+        optimizer.zero_grad()
+        loss, loss_ = loss_function(X, B_est, config)
+        loss.backward()
+        optimizer.step()
         
-    for iteration in range(config["max_iter"]):
-        logs = {
-            'loss': [], 
-            'recon': [],
-            'L1': [],
-            'aug': [],
-        }
-        
-        """primal problem"""
-        while rho < config["rho_max"]:
-            # find argmin of primal problem (local solution) = update for config["epochs"] times
-            for epoch in tqdm.tqdm(range(config["epochs"]), desc="primal update"):
-                optimizer.zero_grad()
-                loss, loss_, h_new = loss_function(X, model, rho, alpha, config)
-                loss.backward()
-                optimizer.step()
-                
-                """accumulate losses"""
-                for x, y in loss_.items():
-                    logs[x] = logs.get(x) + [y.item()]
-                
-            if h_new.item() > config["progress_rate"] * h:
-                rho *= config["rho_rate"]
-            else:
-                break
-        
-        sigmoid_w = convert_logits_to_sigmoid(model.w.detach(), config["temperature"], config)
-        h_logit = h_function(sigmoid_w, config)
-        
-        print_input = "[iteration {:03d}]".format(iteration)
-        print_input += ''.join([', {}: {:.4f}'.format(x, np.mean(y).round(2)) for x, y in logs.items()])
-        print_input += ', h(W): {:.8f}'.format(h_new.item())
-        print_input += ', h(W_logit): {:.8f}'.format(h_logit.item())
-        print(print_input)
+        if iteration % 500 == 0:
+            print_input = "[iteration {:03d}]".format(iteration)
+            print_input += ''.join([', {}: {:.4f}'.format(x, y.item()) for x, y in loss_.items()])
+            print(print_input)
         
         """update log"""
-        wandb.log({x : np.mean(y) for x, y in logs.items()})
-        wandb.log({'h(W)' : h_new.item()})
-        wandb.log({'h(W_logit)' : h_logit.item()})
-        
-        """stopping rule"""
-        if h_new.item() <= config["h_tol"] and iteration > config["init_iter"]:
-            break
-        
-        """dual ascent"""
-        h = h_new.detach().item()
-        alpha += rho * h
+        wandb.log({x : y.item() for x, y in loss_.items()})
     
-    """final metrics"""
-    w_est = convert_logits_to_sigmoid(model.w.detach(), config["temperature"], config)
-    w_est[w_est <= config["w_threshold"]] = 0
-    w_est[w_est > config["w_threshold"]] = 1
-    w_est[np.arange(config["d"]), np.arange(config["d"])] = 0
-    w_est = w_est.numpy()
+    """post-process"""
+    B_hat = B_est.detach().numpy().copy()
+    B_hat = postprocess(B_hat)
+    B_hat = B_hat.astype(float).round(2)
     
-    fig = viz_graph(w_est, size=(7, 7), show=config["fig_show"])
+    fig = viz_graph(B_hat, size=(7, 7), show=config["fig_show"])
     wandb.log({'Graph_est': wandb.Image(fig)})
-    fig = viz_heatmap(w_est, size=(5, 4), show=config["fig_show"])
+    fig = viz_heatmap(B_hat, size=(5, 4), show=config["fig_show"])
     wandb.log({'heatmap_est': wandb.Image(fig)})
 
-    wandb.run.summary['Is DAG?'] = is_dag(w_est)
-    wandb.run.summary['w_est'] = wandb.Table(data=pd.DataFrame(w_est))
-    fig = viz_graph(W_true - w_est, size=(7, 7), show=config["fig_show"])
+    wandb.run.summary['Is DAG?'] = is_dag(B_hat)
+    wandb.run.summary['B_hat'] = wandb.Table(data=pd.DataFrame(B_hat))
+    B_diff = (B_true - B_hat).astype(float).round(2)
+    fig = viz_graph(B_diff, size=(7, 7), show=config["fig_show"])
     wandb.log({'Graph_diff': wandb.Image(fig)})
-    wandb.run.summary['W_diff'] = wandb.Table(data=pd.DataFrame(W_true - w_est))
+    wandb.run.summary['W_diff'] = wandb.Table(data=pd.DataFrame(B_diff))
 
     """accuracy"""
-    acc = count_accuracy(W_true, w_est)
+    B_true_ = (B_true != 0).astype(float)
+    B_hat_ = (B_hat != 0).astype(float)
+    acc = count_accuracy(B_true_, B_hat_)
     wandb.log(acc)
     
     wandb.run.finish()
