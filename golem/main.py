@@ -170,7 +170,8 @@ def main():
 
     wandb.run.summary['Is DAG?'] = is_dag(B_hat)
     wandb.run.summary['B_hat'] = wandb.Table(data=pd.DataFrame(B_hat))
-    B_diff = (B_true - B_hat).astype(float).round(2)
+    B_diff = (B_true.astype(float).round(2) - B_hat).astype(float).round(2)
+    B_diff = (B_diff != 0).astype(float).round(2)
     fig = viz_graph(B_diff, size=(7, 7), show=config["fig_show"])
     wandb.log({'Graph_diff': wandb.Image(fig)})
     wandb.run.summary['W_diff'] = wandb.Table(data=pd.DataFrame(B_diff))
