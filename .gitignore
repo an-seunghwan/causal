@@ -7,6 +7,3 @@ wandb
 etc
 gran_dag/utils/cam_pruning.R
 main_.py
-quantile
-proposals
-group_lasso
