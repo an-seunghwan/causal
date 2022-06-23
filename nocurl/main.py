@@ -1,7 +1,5 @@
 #%%
 import os
-
-from nocurl.utils.util import build_dag
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 #%%
 import numpy as np
@@ -50,9 +48,9 @@ def get_args(debug):
                         help='seed for repeatable results')
     parser.add_argument('--n', default=1000, type=int,
                         help='the number of dataset')
-    parser.add_argument('--d', default=20, type=int,
+    parser.add_argument('--d', default=10, type=int,
                         help='the number of nodes')
-    parser.add_argument('--degree', default=4, type=int,
+    parser.add_argument('--degree', default=3, type=int,
                         help='degree of graph')
     parser.add_argument('--graph_type', type=str, default='ER',
                         help='graph type: ER or SF')
@@ -70,14 +68,14 @@ def get_args(debug):
     
     parser.add_argument('--lr', default=1e-3, type=float,
                         help='learning rate')
-    parser.add_argument('--epochs', default=10000, type=int,
+    parser.add_argument('--epochs', default=50000, type=int,
                         help='number of iterations for training')
     
     parser.add_argument('--w_threshold', default=0.3, type=float,
                         help='Threshold used to determine whether has edge in graph, element greater'
                             'than the w_threshold means has a directed edge, otherwise has not.')
     
-    parser.add_argument('--fig_show', default=True, type=bool)
+    parser.add_argument('--fig_show', default=False, type=bool)
 
     if debug:
         return parser.parse_args(args=[])
@@ -92,7 +90,7 @@ def loss_function(X, p, M, config):
     loss_ = {}
     
     """build weighted adjacency matrix of DAG"""
-    B = build_dag(Y, p, M, config)
+    B = build_dag(p, M, config)
     
     if config["equal_variances"]:
         nll = 0.5 * config["d"] * torch.log(torch.pow(X - X @ B, 2).sum())
@@ -111,7 +109,7 @@ def loss_function(X, p, M, config):
     return loss, loss_, B
 #%%
 def main():
-    config = vars(get_args(debug=True)) # default configuration
+    config = vars(get_args(debug=False)) # default configuration
     config["cuda"] = torch.cuda.is_available()
     wandb.config.update(config)
     
@@ -137,10 +135,12 @@ def main():
     fig = viz_heatmap(B_true.round(2), size=(5, 4), show=config["fig_show"])
     wandb.log({'heatmap': wandb.Image(fig)})
     
-    p = torch.randn((config["d"], ), 
-                    requires_grad=True)
-    M = torch.randn((config["d"], config["d"]), 
-                    requires_grad=True) # set diagonals to be zero
+    p = torch.nn.init.normal_(torch.zeros((config["d"], ), requires_grad=True), mean=0.0, std=0.1)
+    M = torch.nn.init.normal_(torch.zeros((config["d"], config["d"]), requires_grad=True), mean=0.0, std=0.1)
+    # p = torch.randn((config["d"], ), 
+    #                 requires_grad=True)
+    # M = torch.randn((config["d"], config["d"]), 
+    #                 requires_grad=True) # set diagonals to be zero
     optimizer = torch.optim.Adam([p, M], lr=config["lr"])
     
     for iteration in range(config["epochs"]):
