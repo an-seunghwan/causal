@@ -5,6 +5,7 @@ os.chdir(os.path.dirname(os.path.abspath(__file__)))
 import numpy as np
 import pandas as pd
 import tqdm
+import networkx as nx
 
 import torch
 import torch.nn.functional as F
@@ -84,13 +85,26 @@ def main():
     X = X - X.mean(axis=0, keepdims=True)
     X = torch.FloatTensor(X)
     B_true = dataset.B
-    B_bin_true = dataset.B_bin
     
-    fig = viz_graph(B_true.round(2), size=(7, 7), show=config["fig_show"])
-    fig = viz_heatmap(B_true.round(2), size=(5, 4), show=config["fig_show"])
+    G = nx.DiGraph(B_true)
+    p = {x:y for x,y in zip(list(nx.topological_sort(G)), np.arange(config["d"]))}
+    W = torch.zeros(config["d"], config["d"])
+    for i in range(config["d"]):
+        for j in range(config["d"]):
+            if p[i] == p[j] or B_true[i, j] == B_true[j, i] == 0:
+                continue
+            elif B_true[i, j] != 0 and B_true[j, i] == 0:
+                W[i, j] = B_true[i, j] / (p[j] - p[i])
+            elif B_true[i, j] == 0 and B_true[j, i] != 0:
+                W[i, j] = B_true[j, i] / (p[j] - p[i])
     
+    Y = torch.zeros((config["d"], config["d"]))
+    for i in range(config["d"]):
+        for j in range(config["d"]):
+            Y[i, j] = p[j] - p[i]
+    ReLU_Y = F.relu(Y)
     
-    
+    assert (torch.abs(torch.tensor(B_true) - W * ReLU_Y)).sum() < 1e-6
 #%%
 if __name__ == '__main__':
     main()
