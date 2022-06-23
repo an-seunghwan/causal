@@ -7,6 +7,7 @@ import pandas as pd
 import tqdm
 
 import torch
+import torch.nn.functional as F
 
 from utils.simulation import (
     set_random_seed,
@@ -60,7 +61,23 @@ def main():
     set_random_seed(config["seed"])
     torch.manual_seed(config["seed"])
     
-    """load dataset"""   
+    """Theorem 3.5"""
+    p = torch.randn(config["d"])
+    Y = torch.zeros((config["d"], config["d"]))
+    for i in range(config["d"]):
+        for j in range(config["d"]):
+            Y[i, j] = p[j] - p[i]
+    ReLU_Y = F.relu(Y)
+    M = torch.randn((config["d"], config["d"]))
+    W = 0.5 * (M - M.t())
+    A = W * ReLU_Y
+    
+    fig = viz_graph(A.numpy().astype(float).round(2), size=(7, 7), show=config["fig_show"])
+    fig = viz_heatmap(A, size=(5, 4), show=config["fig_show"])
+    
+    assert is_dag(A)
+    
+    """Theorem 3.7"""   
     dataset = SyntheticDataset(config)
     X = dataset.X
     # center the dataset
@@ -71,6 +88,7 @@ def main():
     
     fig = viz_graph(B_true.round(2), size=(7, 7), show=config["fig_show"])
     fig = viz_heatmap(B_true.round(2), size=(5, 4), show=config["fig_show"])
+    
     
     
 #%%
