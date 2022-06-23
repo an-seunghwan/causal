@@ -86,6 +86,8 @@ def main():
     X = torch.FloatTensor(X)
     B_true = dataset.B
     
+    fig = viz_graph(B_true.astype(float).round(2), size=(7, 7), show=config["fig_show"])
+    
     G = nx.DiGraph(B_true)
     p = {x:y for x,y in zip(list(nx.topological_sort(G)), np.arange(config["d"]))}
     W = torch.zeros(config["d"], config["d"])
@@ -105,6 +107,19 @@ def main():
     ReLU_Y = F.relu(Y)
     
     assert (torch.abs(torch.tensor(B_true) - W * ReLU_Y)).sum() < 1e-6
+    
+    # """Unrelated Confounding"""
+    # p = [1, 1, 2, 3, 3]
+    # d = len(p)
+    # Y = torch.zeros((d, d))
+    # for i in range(d):
+    #     for j in range(d):
+    #         Y[i, j] = p[j] - p[i]
+    # ReLU_Y = F.relu(Y)
+    # A = ReLU_Y
+    # fig = viz_graph(A.numpy().astype(float).round(2), size=(7, 7), show=config["fig_show"])
+    
+    # assert is_dag(A)
 #%%
 if __name__ == '__main__':
     main()
