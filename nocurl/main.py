@@ -36,7 +36,7 @@ except:
     import wandb
 
 wandb.init(
-    project="(causal)GOLEM", 
+    project="(causal)NOCURL", 
     entity="anseunghwan",
     tags=["linear"],
 )
