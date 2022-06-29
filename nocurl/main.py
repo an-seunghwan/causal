@@ -5,6 +5,7 @@ os.chdir(os.path.dirname(os.path.abspath(__file__)))
 import numpy as np
 import pandas as pd
 import tqdm
+import networkx as nx
 
 import torch
 
@@ -37,7 +38,7 @@ except:
 wandb.init(
     project="(causal)NOCURL", 
     entity="anseunghwan",
-    tags=["linear", "golem"],
+    tags=["linear", "golem", "random"],
 )
 #%%
 import argparse
@@ -68,7 +69,7 @@ def get_args(debug):
     
     parser.add_argument('--lr', default=1e-3, type=float,
                         help='learning rate')
-    parser.add_argument('--epochs', default=50000, type=int,
+    parser.add_argument('--epochs', default=10000, type=int,
                         help='number of iterations for training')
     
     parser.add_argument('--w_threshold', default=0.3, type=float,
@@ -135,12 +136,17 @@ def main():
     fig = viz_heatmap(B_true.round(2), size=(5, 4), show=config["fig_show"])
     wandb.log({'heatmap': wandb.Image(fig)})
     
-    p = torch.nn.init.normal_(torch.zeros((config["d"], ), requires_grad=True), mean=0.0, std=0.1)
-    M = torch.nn.init.normal_(torch.zeros((config["d"], config["d"]), requires_grad=True), mean=0.0, std=0.1)
-    # p = torch.randn((config["d"], ), 
-    #                 requires_grad=True)
-    # M = torch.randn((config["d"], config["d"]), 
-    #                 requires_grad=True) # set diagonals to be zero
+    """topological ordered p"""
+    # G = nx.DiGraph(B_true)
+    # p = {x:y for x,y in zip(list(nx.topological_sort(G)), np.arange(config["d"]))}
+    """random initialization of p"""
+    p = torch.nn.init.normal_(torch.zeros((config["d"], ), requires_grad=True), 
+                              mean=0.0, std=0.1)
+    
+    M = torch.nn.init.normal_(torch.zeros((config["d"], config["d"]), requires_grad=True), 
+                              mean=0.0, std=0.1)
+    
+    # optimizer = torch.optim.Adam([M], lr=config["lr"])
     optimizer = torch.optim.Adam([p, M], lr=config["lr"])
     
     for iteration in range(config["epochs"]):
