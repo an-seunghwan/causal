@@ -5,13 +5,13 @@ metric:
   goal: minimize
   name: loss
 parameters:
-  # seed:
-  #   values: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-  # n:
-  #   values: [10000]
-  # d:
-  #   values: [20]
-  # degree:
-  #   values: [5]
-  lambda:
-    values: [0.0005, 0.01, 0.02, 0.05, 0.1]
+  seed:
+    values: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+  n:
+    values: [1000, 5000, 10000]
+  d:
+    values: [10, 20, 50, 100]
+  degree:
+    values: [3, 4, 5]
+  # lambda:
+  #   values: [0.0005, 0.01, 0.02, 0.05, 0.1]
