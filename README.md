@@ -10,6 +10,8 @@ This repository is unofficial implementation of following papers with pytorch. T
 - [Masked Gradient-Based Causal Structure Learning](https://epubs.siam.org/doi/pdf/10.1137/1.9781611977172.48) (`mcsl`)
 - [On the Role of Sparsity and DAG Constraints for Learning Linear DAGs](https://proceedings.neurips.cc/paper/2020/file/d04d42cdf14579cd294e5079e0745411-Paper.pdf) (`golem`)
 - [DAGs with No Curl: An Efficient DAG Structure Learning Approach](http://proceedings.mlr.press/v139/yu21a/yu21a.pdf) (`nocurl`)
+- [Penalized likelihood methods for estimation of sparse
+high-dimensional directed acyclic graphs](https://academic.oup.com/biomet/article/97/3/519/243918?login=true) (`penalized`)
 
 ## Reference
 
