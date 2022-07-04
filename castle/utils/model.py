@@ -7,86 +7,84 @@ import numpy as np
 
 from torch.autograd import Variable
 #%%
-class GAE(nn.Module):
+class CASTLE(nn.Module):
     def __init__(self, config):
-        super(GAE, self).__init__()
+        super(CASTLE, self).__init__()
         
         self.config = config
         
-        # encoder 
-        encoder = []
-        in_dim = config["x_dim"]
-        for j in range(config["num_layer"]):
-            encoder.append(nn.Linear(in_dim, config["hidden_dim"]))
-            encoder.append(nn.LeakyReLU(0.05))
-            in_dim = config["hidden_dim"]
-        encoder.append(nn.Linear(in_dim, config["latent_dim"]))
-        self.encoder = nn.ModuleList(encoder)
+        self.W1 = nn.ParameterList(
+            [nn.Parameter(Variable(torch.randn(self.config["d"], self.config["hidden_dim"]) * 0.1, requires_grad=True))
+            for _ in range(self.config["d"])])
         
-        # decoder
-        decoder = []
-        in_dim = config["latent_dim"]
-        for j in range(config["num_layer"]):
-            decoder.append(nn.Linear(in_dim, config["hidden_dim"]))
-            decoder.append(nn.LeakyReLU(0.05))
-            in_dim = config["hidden_dim"]
-        decoder.append(nn.Linear(in_dim, config["x_dim"]))
-        self.decoder = nn.ModuleList(decoder)
-        
-        # self.init_weights()
-        
-        # weighted adjacency matrix
-        W = torch.rand(config["d"], config["d"])
-        min = -0.1
-        max = 0.1
-        W = (max - min) * W + min # ~ Uniform(-0.1, 0.1)
-        W = W.fill_diagonal_(0.)
-        self.W = nn.Parameter(W, requires_grad=True)
+        self.masks = [torch.transpose(1. - F.one_hot(torch.tensor([i] * self.config["hidden_dim"]), self.config["d"]), 0, 1) 
+                        for i in range(self.config["d"])]
+
+        self.fc2 = nn.Linear(self.config["hidden_dim"], self.config["hidden_dim"])
+
+        self.W3 = nn.ParameterList(
+            [nn.Parameter(Variable(torch.randn(self.config["hidden_dim"], 1) * 0.1, requires_grad=True))
+            for _ in range(self.config["d"])])
+        self.b3 = nn.ParameterList(
+            [nn.Parameter(Variable(torch.randn(1, ) * 0.1, requires_grad=True))
+            for _ in range(self.config["d"])])
     
-    # def init_weights(self):
-    #     for m in self.modules():
-    #         if isinstance(m, nn.Linear):
-    #             nn.init.xavier_normal_(m.weight.data)
-    #         elif isinstance(m, nn.BatchNorm1d):
-    #             m.weight.data.fill_(1)
-    #             m.bias.data.zero_()
+    def build_adjacency_matrix(self):
+        W1_masked = [w * m for w, m in zip(self.W1, self.masks)]
+        W = torch.cat([torch.sqrt(torch.sum(torch.pow(w, 2), dim=1, keepdim=True)) for w in W1_masked], dim=1)
+        return W
     
     def forward(self, input):
-        h = input.reshape(-1, self.config["x_dim"])
-        # encoder
-        for e in self.encoder:
-            h = e(h)
-        # causal structure
-        h = h.reshape(-1, self.config["d"], self.config["latent_dim"])
-        h = torch.matmul(self.W.t(), h)
-        h = h.reshape(-1, self.config["latent_dim"])
-        # decoder
-        for d in self.decoder:
-            h = d(h)
-        h = h.reshape(-1, self.config["d"], self.config["x_dim"])
-        return h
+        W1_masked = [w * m for w, m in zip(self.W1, self.masks)]
+        h = [torch.matmul(input, w) for w in W1_masked]
+        h = [self.fc2(h_) for h_ in h]
+        h = [nn.ReLU()(h_) for h_ in h]
+        h = [nn.ReLU()(torch.matmul(h_, w) + b) for h_, w, b in zip(h, self.W3, self.b3)]
+        h = torch.cat(h, dim=1)
+        return h, W1_masked
 #%%
 def main():
     config = {
-        "n": 100,
-        "d": 7,
-        "x_dim": 5,
-        "latent_dim": 3,
-        "num_layer": 2,
-        "hidden_dim": 16,
+        "n": 1000,
+        "d": 10,
+        "hidden_dim": 32,
     }
     
-    model = GAE(config)
+    model = CASTLE(config)
     for x in model.parameters():
         print(x)
-    assert torch.trace(model.W) == 0.
     
-    batch = torch.rand(config["n"], config["d"], config["x_dim"])
+    batch = torch.randn(config["n"], config["d"])
     recon = model(batch)
-    assert recon.shape == (config["n"], config["d"], config["x_dim"])
+    assert recon.shape == (config["n"], config["d"])
+    
+    B = model.build_adjacency_matrix()
+    assert B.shape == (config["d"], config["d"])
     
     print("Model test pass!")
 #%%
 if __name__ == '__main__':
     main()
+#%%
+# W1 = [nn.Parameter(Variable(torch.randn(config["d"], config["hidden_dim"]) * 0.1, requires_grad=True))
+#       for _ in range(config["d"])]
+# masks = [torch.transpose(1. - F.one_hot(torch.tensor([i] * config["hidden_dim"]), config["d"]), 0, 1) 
+#         for i in range(config["d"])]
+
+# fc2 = nn.Linear(config["hidden_dim"], config["hidden_dim"])
+
+# W3 = [nn.Parameter(Variable(torch.randn(config["hidden_dim"], 1) * 0.1, requires_grad=True))
+#       for _ in range(config["d"])]
+# b3 = [nn.Parameter(Variable(torch.randn(1, ) * 0.1, requires_grad=True))
+#       for _ in range(config["d"])]
+
+# W1_masked = [w * m for w, m in zip(W1, masks)]
+# X = torch.randn(config["n"], config["d"])
+# h = [torch.matmul(X, w) for w in W1_masked]
+# h = [fc2(h_) for h_ in h]
+# h = [nn.ReLU()(h_) for h_ in h]
+# h = [nn.ReLU()(torch.matmul(h_, w) + b) for h_, w, b in zip(h, W3, b3)]
+# h = torch.cat(h, dim=1)
+
+# W = torch.cat([torch.sum(w, dim=1, keepdim=True) for w in W1_masked], dim=1)
 #%%
