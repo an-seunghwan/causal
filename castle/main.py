@@ -30,7 +30,7 @@ from utils.model import (
     CASTLE
 )
 
-from utils.trac_exp import trace_expm
+# from utils.trac_exp import trace_expm
 #%%
 import sys
 import subprocess
@@ -70,7 +70,7 @@ def get_args(debug):
                         help='threshold for weighted adjacency matrix')
     parser.add_argument('--lambda', default=1, type=float,
                         help='coefficient of supervised loss')
-    parser.add_argument('--beta', default=1, type=float,
+    parser.add_argument('--beta', default=5, type=float,
                         help='coefficient of LASSO penalty')
     parser.add_argument('--rho', default=1, type=float,
                         help='rho')
@@ -96,9 +96,20 @@ def get_args(debug):
     else:    
         return parser.parse_args()
 #%%
-def h_fun(W):
+def h_fun(W, config):
     """Evaluate DAGness constraint"""
-    h = trace_expm(W * W) - W.shape[0]
+    # h = trace_expm(W * W) - W.shape[0]
+    
+    # truncated power series
+    coff = 1.
+    Z = W * W
+    dag_I = config["d"]
+    Z_in = torch.eye(config["d"])
+    for i in range(1, 10):
+        Z_in = torch.matmul(Z_in, Z)
+        dag_I += 1./coff * torch.trace(Z_in)
+        coff *= (i + 1)
+    h = dag_I - config["d"]
     return h
 #%%
 def train(X, model, config, optimizer):
@@ -122,6 +133,8 @@ def train(X, model, config, optimizer):
         
         recon, W1_masked = model(batch_x)
         W = model.build_adjacency_matrix()
+        # set diagnoal to zero
+        W *= 1. - torch.eye(config["d"])
         
         loss_ = []
         
@@ -134,11 +147,12 @@ def train(X, model, config, optimizer):
         loss_.append(('recon', recon))
 
         """sparsity loss"""
-        GroupL1 = sum([torch.norm(w, dim=1, p=2).sum() for w in W1_masked])
+        GroupL1 = sum([torch.norm(w[:k, :], dim=1, p=2).sum() for k, w in enumerate(W1_masked)])
+        GroupL1 += sum([torch.norm(w[k+1:, :], dim=1, p=2).sum() for k, w in enumerate(W1_masked)])
         loss_.append(('GroupL1', GroupL1))
 
         """augmentation and lagrangian loss"""
-        h_A = h_fun(W)
+        h_A = h_fun(W, config)
         aug = 0.5 * config["rho"] * (h_A ** 2)
         aug += config["alpha"] * h_A
         loss_.append(('aug', aug))
@@ -157,7 +171,7 @@ def train(X, model, config, optimizer):
     return logs
 #%%
 def main():
-    config = vars(get_args(debug=False)) # default configuration
+    config = vars(get_args(debug=True)) # default configuration
     config["cuda"] = torch.cuda.is_available()
     wandb.config.update(config)
     
@@ -177,7 +191,6 @@ def main():
             G = swap_nodes(G, 0, i)
             break      
             
-    #print("Number of parents of G", len(list(G.predecessors(i))))
     print("Edges = ", list(G.edges()))
     
     scaler = StandardScaler()
@@ -204,7 +217,7 @@ def main():
         logs = train(X, model, config, optimizer)
         
         W_est = model.build_adjacency_matrix().detach().data.clone()
-        h = h_fun(W_est)
+        h = h_fun(W_est, config)
         
         if epoch % 20 == 0:
             print_input = "[iteration {:03d}]".format(epoch)

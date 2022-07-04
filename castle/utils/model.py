@@ -37,8 +37,7 @@ class CASTLE(nn.Module):
     def forward(self, input):
         W1_masked = [w * m for w, m in zip(self.W1, self.masks)]
         h = [torch.matmul(input, w) for w in W1_masked]
-        h = [self.fc2(h_) for h_ in h]
-        h = [nn.ReLU()(h_) for h_ in h]
+        h = [nn.ReLU()(self.fc2(h_)) for h_ in h]
         h = [nn.ReLU()(torch.matmul(h_, w) + b) for h_, w, b in zip(h, self.W3, self.b3)]
         h = torch.cat(h, dim=1)
         return h, W1_masked
