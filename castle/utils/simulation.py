@@ -28,48 +28,41 @@ def is_dag(W: np.ndarray):
     G = ig.Graph.Weighted_Adjacency(W.tolist())
     return G.is_dag()
 #%%
-def simulate_dag(d, s0, graph_type):
+def simulate_dag(d: int, 
+                 degree: float, 
+                 graph_type: str):
     """Simulate random DAG with some expected number of edges
     Args:
         d (int): number of nodes
-        s0 (int): expected number of edges
-        graph_type (str): ER, SF, BP
-
+        degree (float): expected node degree (= in + out)
+        graph_type (str): ER, SF
     Returns:
-        B (np.ndarray): d x d binary adjacency matrix of DAG
+        B_perm (np.ndarray): d x d adjacency matrix of DAG
     """
     
-    '''?????'''
     def _random_permutation(M):
         P = np.random.permutation(np.eye(M.shape[0]))
         return P.T @ M @ P
-
-    def _random_acyclic_orientation(B_und):
-        return np.tril(_random_permutation(B_und), k=-1)
     
-    def _graph_to_adjmat(G):
-        # make igraph object to adjacency matrix 
-        return np.array(G.get_adjacency().data)
-    
-    if graph_type == 'ER':
-        # Erdos-Renyi
-        G_und = ig.Graph.Erdos_Renyi(n=d, m=s0)
-        B_und = _graph_to_adjmat(G_und)
-        B = _random_acyclic_orientation(B_und)
-    elif graph_type == 'SF':
-        # Scale-free, Barabasi-Albert
-        G = ig.Graph.Barabasi(n=d, m=int(round(s0 / d)), directed=True)
-        B = _graph_to_adjmat(G)
-    elif graph_type == 'BP':
-        # Bipartite, Sec 4.1 of (Gu, Fu, Zhou, 2018)
-        top = int(0.2 * d)
-        G = ig.Graph.Random_Bipartite(top, d - top, m=s0, directed=True, neimode=ig.OUT)
-        B = _graph_to_adjmat(G)
+    if graph_type == 'ER': # Erdos-Renyi
+        prob = float(degree) / (d - 1)
+        # select nodes which are goint to be connected (with probability prob)
+        B = np.tril((np.random.rand(d, d) < prob).astype(float), k=-1) # lower triangular
+    elif graph_type == 'SF': # Scale-free, Barabasi-Albert
+        m = int(round(degree / 2))
+        B = np.zeros([d, d])
+        bag = [0]
+        for i in range(1, d):
+            dest = np.random.choice(bag, size=m)
+            for j in dest:
+                B[i, j] = 1
+            bag.append(i)
+            bag.extend(dest)
     else:
         raise ValueError('unknown graph type')
     
+    W = np.zeros(B.shape)
     B_perm = _random_permutation(B)
-    
     assert ig.Graph.Adjacency(B_perm.tolist()).is_dag()
     
     return B_perm

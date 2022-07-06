@@ -63,20 +63,20 @@ def get_args(debug):
     #                     help='expected number of edges')
     # parser.add_argument('--nonlinear_sigmoid', type=bool, default=True,
     #                     help='nonlinear causal structure type: nonlinear_1, nonlinear_2')
-    parser.add_argument('--s0', default=15, type=int,
+    parser.add_argument('--degree', default=4, type=int,
                         help='expected number of edges')
     parser.add_argument('--graph_type', type=str, default='ER',
-                        help='graph type: ER, SF, BP')
+                        help='graph type: ER, SF')
     parser.add_argument('--sem_type', type=str, default='mim',
                         help='sem type: mlp, mim, gp, gp-add')
 
-    parser.add_argument('--w_threshold', default=0.3, type=float,
+    parser.add_argument('--w_threshold', default=0.2, type=float,
                         help='threshold for weighted adjacency matrix')
     parser.add_argument('--lambda', default=1, type=float,
                         help='coefficient of supervised loss')
-    parser.add_argument('--beta', default=1, type=float,
+    parser.add_argument('--beta', default=2, type=float,
                         help='coefficient of LASSO penalty')
-    parser.add_argument('--rho', default=1, type=float,
+    parser.add_argument('--rho', default=10, type=float,
                         help='rho')
     parser.add_argument('--alpha', default=1, type=float,
                         help='alpha')
@@ -179,7 +179,7 @@ def train(X, model, config, optimizer):
     return logs
 #%%
 def main():
-    config = vars(get_args(debug=False)) # default configuration
+    config = vars(get_args(debug=True)) # default configuration
     config["cuda"] = torch.cuda.is_available()
     wandb.config.update(config)
     
@@ -198,7 +198,7 @@ def main():
     # print("Edges = ", list(G.edges()))
     
     '''simulate DAG and weighted adjacency matrix'''
-    B_true = simulate_dag(config["d"], config["s0"], config["graph_type"])
+    B_true = simulate_dag(config["d"], config["degree"], config["graph_type"])
 
     '''simulate dataset'''
     X, G, ordered_vertices = simulate_nonlinear_sem(B_true, config["n"], config["sem_type"])
@@ -209,12 +209,17 @@ def main():
     scaler = StandardScaler()
     X = scaler.fit_transform(X)
     
-    # target is the first column
+    min_parents = config["d"] // 2
     # target = ordered_vertices[-3]
-    for i in range(config["d"]):
-        if len(list(G.predecessors(i))) > 0:
-            target = i
-            break      
+    target = None
+    while target is None:
+        for i in range(config["d"]):
+            if len(list(G.predecessors(i))) >= min_parents:
+                target = i
+                break  
+        min_parents -= 1
+    print("Number of parents of target:", min_parents)
+    # target is the first column
     X = np.concatenate((X[:, [target]], X[:, :target], X[:, target + 1:]), axis=1)
     B_true = np.concatenate((B_true[:, [target]], B_true[:, :target], B_true[:, target + 1:]), axis=1)
 
