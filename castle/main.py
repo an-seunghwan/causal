@@ -14,10 +14,8 @@ import networkx as nx
 from utils.simulation import (
     set_random_seed,
     is_dag,
-    random_dag,
-    swap_cols,
-    swap_nodes,
-    gen_data_nonlinear,
+    simulate_dag,
+    simulate_nonlinear_sem,
     count_accuracy
 )
 
@@ -61,10 +59,16 @@ def get_args(debug):
                         help='the number of dataset')
     parser.add_argument('--d', default=10, type=int,
                         help='the number of nodes')
-    parser.add_argument('--branchf', default=4, type=int,
+    # parser.add_argument('--branchf', default=4, type=int,
+    #                     help='expected number of edges')
+    # parser.add_argument('--nonlinear_sigmoid', type=bool, default=True,
+    #                     help='nonlinear causal structure type: nonlinear_1, nonlinear_2')
+    parser.add_argument('--s0', default=15, type=int,
                         help='expected number of edges')
-    parser.add_argument('--nonlinear_sigmoid', type=bool, default=True,
-                        help='nonlinear causal structure type: nonlinear_1, nonlinear_2')
+    parser.add_argument('--graph_type', type=str, default='ER',
+                        help='graph type: ER, SF, BP')
+    parser.add_argument('--sem_type', type=str, default='mim',
+                        help='sem type: mlp, mim, gp, gp-add')
 
     parser.add_argument('--w_threshold', default=0.3, type=float,
                         help='threshold for weighted adjacency matrix')
@@ -97,10 +101,10 @@ def get_args(debug):
         return parser.parse_args()
 #%%
 def h_fun(W, config):
-    """Evaluate DAGness constraint"""
+    # """Evaluate DAGness constraint"""
     # h = trace_expm(W * W) - W.shape[0]
     
-    # truncated power series
+    """truncated power series"""
     coff = 1.
     Z = W * W
     dag_I = config["d"]
@@ -134,7 +138,7 @@ def train(X, model, config, optimizer):
         recon, W1_masked = model(batch_x)
         W = model.build_adjacency_matrix()
         # set diagnoal to zero
-        W *= 1. - torch.eye(config["d"])
+        # W *= 1. - torch.eye(config["d"])
         
         loss_ = []
         
@@ -147,8 +151,9 @@ def train(X, model, config, optimizer):
         loss_.append(('recon', recon))
 
         """sparsity loss"""
-        GroupL1 = sum([torch.norm(w[:k, :], dim=1, p=2).sum() for k, w in enumerate(W1_masked)])
-        GroupL1 += sum([torch.norm(w[k+1:, :], dim=1, p=2).sum() for k, w in enumerate(W1_masked)])
+        GroupL1 = sum([w.norm(dim=1, p=2).sum() for w in W1_masked])
+        # GroupL1 = sum([torch.norm(w[:k, :], dim=1, p=2) for k, w in enumerate(W1_masked)])
+        # GroupL1 += sum([torch.norm(w[k+1:, :], dim=1, p=2).sum() for k, w in enumerate(W1_masked)])
         loss_.append(('GroupL1', GroupL1))
 
         """augmentation and lagrangian loss"""
@@ -162,6 +167,9 @@ def train(X, model, config, optimizer):
         loss_.append(('loss', loss))
         
         loss.backward()
+        # nan gradient due to masking: set nan to zero
+        for weight in model.parameters():
+            weight.grad = torch.nan_to_num(weight.grad, nan=0.)
         optimizer.step()
         
         """accumulate losses"""
@@ -171,7 +179,7 @@ def train(X, model, config, optimizer):
     return logs
 #%%
 def main():
-    config = vars(get_args(debug=True)) # default configuration
+    config = vars(get_args(debug=False)) # default configuration
     config["cuda"] = torch.cuda.is_available()
     wandb.config.update(config)
     
@@ -179,23 +187,36 @@ def main():
     torch.manual_seed(config["seed"])
     if config["cuda"]:
         torch.cuda.manual_seed(config["seed"])
-    noise = random.uniform(0.3, 1.0)
-    print("Setting noise to:", noise)
+        
+    # noise = random.uniform(0.3, 1.0)
+    # print("Setting noise to:", noise)
     
-    G = random_dag(config["d"], config["d"] * config["branchf"])
-    X = gen_data_nonlinear(G, var=noise, SIZE=config["n"], sigmoid=config["nonlinear_sigmoid"])
+    # G = random_dag(config["d"], config["d"] * config["branchf"])
+    # X = gen_data_nonlinear(G, SIZE=config["n"], sigmoid=config["nonlinear_sigmoid"])
+    # X = gen_data_nonlinear(G, var=noise, SIZE=config["n"], sigmoid=config["nonlinear_sigmoid"])
     
-    for i in range(len(G.edges())):
-        if len(list(G.predecessors(i))) > 0:
-            X = swap_cols(X, str(0), str(i))
-            G = swap_nodes(G, 0, i)
-            break      
-            
-    print("Edges = ", list(G.edges()))
+    # print("Edges = ", list(G.edges()))
     
+    '''simulate DAG and weighted adjacency matrix'''
+    B_true = simulate_dag(config["d"], config["s0"], config["graph_type"])
+
+    '''simulate dataset'''
+    X, G, ordered_vertices = simulate_nonlinear_sem(B_true, config["n"], config["sem_type"])
+    assert X.shape[0] == config["n"]
+    assert X.shape[1] == config["d"]
+    
+    # standardization
     scaler = StandardScaler()
     X = scaler.fit_transform(X)
-    B_true = np.array(nx.to_numpy_matrix(G))
+    
+    # target is the first column
+    # target = ordered_vertices[-3]
+    for i in range(config["d"]):
+        if len(list(G.predecessors(i))) > 0:
+            target = i
+            break      
+    X = np.concatenate((X[:, [target]], X[:, :target], X[:, target + 1:]), axis=1)
+    B_true = np.concatenate((B_true[:, [target]], B_true[:, :target], B_true[:, target + 1:]), axis=1)
 
     wandb.run.summary['W_true'] = wandb.Table(data=pd.DataFrame(B_true))
     fig = viz_graph(B_true, size=(7, 7), show=config["fig_show"])

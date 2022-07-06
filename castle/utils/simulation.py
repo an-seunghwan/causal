@@ -1,9 +1,10 @@
 #%%
-"""
-code from:
-https://github.com/vanderschaarlab/mlforhealthlabpub/blob/main/alg/castle/utils.py
-"""
+# """
+# code from:
+# https://github.com/vanderschaarlab/mlforhealthlabpub/blob/main/alg/castle/utils.py
+# """
 #%%
+import torch
 import pandas as pd
 import numpy as np
 import random
@@ -13,6 +14,9 @@ import networkx as nx
 def set_random_seed(seed):
     random.seed(seed)
     np.random.seed(seed)
+#%%
+def sigmoid(z):
+    return 1. / (1. + np.exp(-z))
 #%%
 def is_dag(W: np.ndarray):
     """check DAGness
@@ -24,60 +28,176 @@ def is_dag(W: np.ndarray):
     G = ig.Graph.Weighted_Adjacency(W.tolist())
     return G.is_dag()
 #%%
-def random_dag(nodes, edges):
-    """Generate a random Directed Acyclic Graph (DAG) with a given number of nodes and edges."""
-    G = nx.DiGraph()
-    for i in range(nodes):
-        G.add_node(i)
-    while edges > 0:
-        a = random.randint(0, nodes-1)
-        b = a
-        while b == a:
-            b = random.randint(0,nodes-1)
-        G.add_edge(a,b)
-        if nx.is_directed_acyclic_graph(G):
-            edges -= 1
-        else:
-            # we closed a loop!
-            G.remove_edge(a,b)
-    return G
+def simulate_dag(d, s0, graph_type):
+    """Simulate random DAG with some expected number of edges
+    Args:
+        d (int): number of nodes
+        s0 (int): expected number of edges
+        graph_type (str): ER, SF, BP
+
+    Returns:
+        B (np.ndarray): d x d binary adjacency matrix of DAG
+    """
+    
+    '''?????'''
+    def _random_permutation(M):
+        P = np.random.permutation(np.eye(M.shape[0]))
+        return P.T @ M @ P
+
+    def _random_acyclic_orientation(B_und):
+        return np.tril(_random_permutation(B_und), k=-1)
+    
+    def _graph_to_adjmat(G):
+        # make igraph object to adjacency matrix 
+        return np.array(G.get_adjacency().data)
+    
+    if graph_type == 'ER':
+        # Erdos-Renyi
+        G_und = ig.Graph.Erdos_Renyi(n=d, m=s0)
+        B_und = _graph_to_adjmat(G_und)
+        B = _random_acyclic_orientation(B_und)
+    elif graph_type == 'SF':
+        # Scale-free, Barabasi-Albert
+        G = ig.Graph.Barabasi(n=d, m=int(round(s0 / d)), directed=True)
+        B = _graph_to_adjmat(G)
+    elif graph_type == 'BP':
+        # Bipartite, Sec 4.1 of (Gu, Fu, Zhou, 2018)
+        top = int(0.2 * d)
+        G = ig.Graph.Random_Bipartite(top, d - top, m=s0, directed=True, neimode=ig.OUT)
+        B = _graph_to_adjmat(G)
+    else:
+        raise ValueError('unknown graph type')
+    
+    B_perm = _random_permutation(B)
+    
+    assert ig.Graph.Adjacency(B_perm.tolist()).is_dag()
+    
+    return B_perm
 #%%
-def swap_cols(df, a, b):
-    df = df.rename(columns = {a : 'temp'})
-    df = df.rename(columns = {b : a})
-    return df.rename(columns = {'temp' : b})
-def swap_nodes(G, a, b):
-    newG = nx.relabel_nodes(G, {a : 'temp'})
-    newG = nx.relabel_nodes(newG, {b : a})
-    return nx.relabel_nodes(newG, {'temp' : b})
-#%%
-# This function generates data according to a DAG provided in list_vertex and list_edges with mean and variance as input
-# It will apply a perturbation at each node provided in perturb.
-def gen_data_nonlinear(G, mean = 0, var = 1, SIZE = 10000, perturb = [], sigmoid = True):
-    list_edges = G.edges()
-    list_vertex = G.nodes()
-
-    order = []
-    for ts in nx.algorithms.dag.topological_sort(G):
-        order.append(ts)
-
-    g = []
-    for v in list_vertex:
-        if v in perturb:
-            g.append(np.random.normal(mean,var,SIZE))
-            print("perturbing ", v, "with mean var = ", mean, var)
+def simulate_nonlinear_sem(B, n, sem_type, noise_scale=None):
+    """Simulate samples from nonlinear SEM.
+    Args:
+        B (np.ndarray): [d, d] binary adj matrix of DAG
+        n (int): num of samples
+        sem_type (str): mlp, mim, gp, gp-add
+        noise_scale (np.ndarray): scale parameter of additive noise, default all ones
+        
+    Returns:
+        X (np.ndarray): [n, d] sample matrix
+    """
+    
+    def _simulate_single_equation(x, scale):
+        """
+        input:
+            x: [n, num of parents]
+            scale: noise size
+        output:
+            x: [n]
+        """
+        
+        z = np.random.normal(scale=scale, size=n)
+        
+        parent_size = x.shape[1]
+        if parent_size == 0:
+            return z
+        
+        weight_range = (0.5, 2.)
+        low, high = weight_range
+        
+        if sem_type == "mlp":
+            # sampling MLP weights
+            hidden = 100
+            W1 = np.random.uniform(low=low, high=high, size=[parent_size, hidden])
+            W1[np.random.rand(W1.shape[0], W1.shape[1]) < 0.5] *= -1
+            W2 = np.random.uniform(low=low, high=high, size=hidden)
+            W2[np.random.rand(W2.shape[0]) < 0.5] *= -1
+            x = sigmoid(x @ W1) @ W2 + z
+        elif sem_type == "mim":
+            W1 = np.random.uniform(low=low, high=high, size=parent_size)
+            W1[np.random.rand(W1.shape[0]) < 0.5] *= -1
+            W2 = np.random.uniform(low=low, high=high, size=parent_size)
+            W2[np.random.rand(W2.shape[0]) < 0.5] *= -1
+            W3 = np.random.uniform(low=low, high=high, size=parent_size)
+            W3[np.random.rand(W3.shape[0]) < 0.5] *= -1
+            x = np.tanh(x @ W1) + np.cos(x @ W2) + np.sin(x @ W3) + z
+        elif sem_type == 'gp':
+            from sklearn.gaussian_process import GaussianProcessRegressor
+            gp = GaussianProcessRegressor()
+            x = gp.sample_y(x, random_state=None).flatten() + z
+        elif sem_type == 'gp-add':
+            from sklearn.gaussian_process import GaussianProcessRegressor
+            gp = GaussianProcessRegressor()
+            x = sum([gp.sample_y(x[:, i, None], random_state=None).flatten()
+                     for i in range(x.shape[1])]) + z
         else:
-            g.append(np.random.normal(0, 1, SIZE))
+            raise ValueError('unknown sem type')
+        return x
+    
+    d = B.shape[0]
+    scale_vec = noise_scale if noise_scale else np.ones(d)
+    X = np.zeros([n, d])
+    G = ig.Graph.Adjacency(B.tolist())
+    ordered_vertices = G.topological_sorting()
+    assert len(ordered_vertices) == d
+    for j in ordered_vertices:
+        parents = G.neighbors(j, mode=ig.IN)
+        X[:, j] = _simulate_single_equation(X[:, parents], scale_vec[j]) 
+    return X, G, ordered_vertices
+#%%
+# def random_dag(nodes, edges):
+#     """Generate a random Directed Acyclic Graph (DAG) with a given number of nodes and edges."""
+#     G = nx.DiGraph()
+#     for i in range(nodes):
+#         G.add_node(i)
+#     while edges > 0:
+#         a = random.randint(0, nodes-1)
+#         b = a
+#         while b == a:
+#             b = random.randint(0,nodes-1)
+#         G.add_edge(a,b)
+#         if nx.is_directed_acyclic_graph(G):
+#             edges -= 1
+#         else:
+#             # we closed a loop!
+#             G.remove_edge(a,b)
+#     return G
+# #%%
+# def swap_cols(df, a, b):
+#     df = df.rename(columns = {a : 'temp'})
+#     df = df.rename(columns = {b : a})
+#     return df.rename(columns = {'temp' : b})
+# def swap_nodes(G, a, b):
+#     newG = nx.relabel_nodes(G, {a : 'temp'})
+#     newG = nx.relabel_nodes(newG, {b : a})
+#     return nx.relabel_nodes(newG, {'temp' : b})
+# #%%
+# # This function generates data according to a DAG provided in list_vertex and list_edges with mean and variance as input
+# # It will apply a perturbation at each node provided in perturb.
+# def gen_data_nonlinear(G, mean = 0, var = 1, SIZE = 10000, perturb = [], sigmoid = True):
+#     list_edges = G.edges()
+#     list_vertex = G.nodes()
 
-    for o in order:
-        for edge in list_edges:
-            if o == edge[1]: # if there is an edge into this node
-                if sigmoid:
-                    g[edge[1]] += 1 / (1 + np.exp(-g[edge[0]]))
-                else:   
-                    g[edge[1]] += np.square(g[edge[0]])
-    g = np.swapaxes(g,0,1)
-    return pd.DataFrame(g, columns = list(map(str, list_vertex)))
+#     order = []
+#     for ts in nx.algorithms.dag.topological_sort(G):
+#         order.append(ts)
+
+#     g = []
+#     for v in list_vertex:
+#         if v in perturb:
+#             g.append(np.random.normal(mean,var,SIZE))
+#             print("perturbing ", v, "with mean var = ", mean, var)
+#         else:
+#             g.append(np.random.normal(0, 1, SIZE))
+
+#     for o in order:
+#         for edge in list_edges:
+#             if o == edge[1]: # if there is an edge into this node
+#                 if sigmoid:
+#                     g[edge[1]] += 1 / (1 + np.exp(-g[edge[0]]))
+#                 else:   
+#                     g[edge[1]] += np.square(g[edge[0]])
+#     g = np.swapaxes(g,0,1)
+#     return pd.DataFrame(g, columns = list(map(str, list_vertex)))
 #%%
 def count_accuracy(B_true, B_est):
     """Compute various accuracy metrics for B_est.
@@ -127,14 +247,37 @@ def count_accuracy(B_true, B_est):
     return {'FDR': FDR, 'SHD': SHD, 'nonzero': len(pred)}
 #%%
 def main():
-    n = 1000
-    nodes = 10
-    edges = 4
+    # n = 1000
+    # nodes = 10
+    # edges = 4
     
-    G = random_dag(nodes, edges)
-    X = gen_data_nonlinear(G, SIZE=n, sigmoid=True)
-    assert X.shape == (n, nodes)
-    print('data generation passed!\n')
+    # G = random_dag(nodes, edges)
+    # X = gen_data_nonlinear(G, SIZE=n, sigmoid=True)
+    # assert X.shape == (n, nodes)
+    # print('data generation passed!\n')
+    
+    n = 100
+    d = 5
+    degree = 4
+    # graph_type = "ER"
+    # sem_type = "gauss"
+    # nonlinear_type = "nonlinear_2"
+    
+    for graph_type in ['ER', 'SF']:
+        W = simulate_dag(d, degree, graph_type)
+        assert is_dag(W)
+        assert W.shape == (d, d)
+    print('graph_type passed!\n')
+        
+    for sem_type in ['gauss', 'exp', 'gumbel', 'uniform', 'logistic', 'poisson']:
+        X = simulate_sem(W, n, sem_type=sem_type)    
+        assert X.shape == (n, d)
+    print('sem_type passed!\n')
+    
+    for nonlinear_type in ['nonlinear_1', 'nonlinear_2']:
+        X = simulate_sem(W, n, nonlinear_type=nonlinear_type)
+        assert X.shape == (n, d)
+    print('nonlinear_type passed!\n')
 #%%
 if __name__ == '__main__':
     main()
