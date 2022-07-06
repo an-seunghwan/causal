@@ -10,9 +10,9 @@ parameters:
   lambda:
     values: [1]
   beta:
-    values: [2, 4, 6]
+    values: [4, 6, 8, 10]
   rho:
-    values: [1, 2, 5, 10]
+    values: [10, 20, 50]
   alpha:
     values: [1]
   w_threshold:
