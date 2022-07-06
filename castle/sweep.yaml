@@ -1,15 +1,19 @@
-project: (causal)GAE
+project: (causal)CASTLE
 program: main.py
 method: grid
 metric:
   goal: minimize
-  name: loss
+  name: supervised_loss
 parameters:
-  seed:
-    values: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
-  # s0:
-  #   values: [5, 8, 10]
-  # lambda:
-  #   values: [0.1, 0.01, 0.001]
-  # rho_rate:
-  #   values: [2, 5, 10]
+  # seed:
+  #   values: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+  lambda:
+    values: [1]
+  beta:
+    values: [2, 4, 6]
+  rho:
+    values: [1, 2, 5, 10]
+  alpha:
+    values: [1]
+  w_threshold:
+    values: [0.2, 0.3]

@@ -44,7 +44,7 @@ except:
 wandb.init(
     project="(causal)CASTLE", 
     entity="anseunghwan",
-    # tags=[],
+    tags=["nonlinear"],
 )
 #%%
 import argparse
@@ -74,7 +74,7 @@ def get_args(debug):
                         help='threshold for weighted adjacency matrix')
     parser.add_argument('--lambda', default=1, type=float,
                         help='coefficient of supervised loss')
-    parser.add_argument('--beta', default=5, type=float,
+    parser.add_argument('--beta', default=1, type=float,
                         help='coefficient of LASSO penalty')
     parser.add_argument('--rho', default=1, type=float,
                         help='rho')
@@ -135,7 +135,7 @@ def train(X, model, config, optimizer):
         
         optimizer.zero_grad()
         
-        recon, W1_masked = model(batch_x)
+        xhat, W1_masked = model(batch_x)
         W = model.build_adjacency_matrix()
         # set diagnoal to zero
         # W *= 1. - torch.eye(config["d"])
@@ -143,11 +143,11 @@ def train(X, model, config, optimizer):
         loss_ = []
         
         """prediction"""
-        supervised_loss = torch.pow(batch_y - recon[:, 0], 2).sum() / config["batch_size"]
+        supervised_loss = torch.pow(batch_y - xhat[:, 0], 2).sum() / config["batch_size"]
         loss_.append(('supervised_loss', supervised_loss))
         
         """reconstruction"""
-        recon = torch.pow(recon - batch_x, 2).sum() 
+        recon = torch.pow(batch_x - xhat, 2).sum() 
         loss_.append(('recon', recon))
 
         """sparsity loss"""

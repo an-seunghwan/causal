@@ -258,26 +258,21 @@ def main():
     
     n = 100
     d = 5
-    degree = 4
+    s0 = 4
     # graph_type = "ER"
     # sem_type = "gauss"
     # nonlinear_type = "nonlinear_2"
     
-    for graph_type in ['ER', 'SF']:
-        W = simulate_dag(d, degree, graph_type)
+    for graph_type in ['ER', 'SF', 'BP']:
+        W = simulate_dag(d, s0, graph_type)
         assert is_dag(W)
         assert W.shape == (d, d)
     print('graph_type passed!\n')
         
-    for sem_type in ['gauss', 'exp', 'gumbel', 'uniform', 'logistic', 'poisson']:
-        X = simulate_sem(W, n, sem_type=sem_type)    
+    for sem_type in ['mlp', 'mim', 'gp', 'gp-add']:
+        X, G, ordered_vertices = simulate_nonlinear_sem(W, n, sem_type=sem_type)    
         assert X.shape == (n, d)
     print('sem_type passed!\n')
-    
-    for nonlinear_type in ['nonlinear_1', 'nonlinear_2']:
-        X = simulate_sem(W, n, nonlinear_type=nonlinear_type)
-        assert X.shape == (n, d)
-    print('nonlinear_type passed!\n')
 #%%
 if __name__ == '__main__':
     main()
