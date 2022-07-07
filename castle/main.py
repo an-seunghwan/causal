@@ -63,7 +63,7 @@ def get_args(debug):
     #                     help='expected number of edges')
     # parser.add_argument('--nonlinear_sigmoid', type=bool, default=True,
     #                     help='nonlinear causal structure type: nonlinear_1, nonlinear_2')
-    parser.add_argument('--degree', default=4, type=int,
+    parser.add_argument('--degree', default=3, type=int,
                         help='expected number of edges')
     parser.add_argument('--graph_type', type=str, default='ER',
                         help='graph type: ER, SF')
@@ -81,7 +81,7 @@ def get_args(debug):
     parser.add_argument('--alpha', default=1, type=float,
                         help='alpha')
     
-    parser.add_argument("--hidden_dim", default=32, type=int,
+    parser.add_argument("--hidden_dim", default=8, type=int,
                         help="hidden dimensions for MLP")
     parser.add_argument("--num_layer", default=2, type=int,
                         help="hidden dimensions for MLP")

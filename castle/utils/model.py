@@ -14,10 +14,10 @@ class CASTLE(nn.Module):
         self.config = config
         
         self.W1 = nn.ParameterList(
-            [nn.Parameter(Variable(torch.randn(self.config["d"], self.config["hidden_dim"]) * 0.01, requires_grad=True))
+            [nn.Parameter(Variable(torch.randn(self.config["d"], self.config["hidden_dim"]) * 0.1, requires_grad=True))
             for _ in range(self.config["d"])])
         self.b1 = nn.ParameterList(
-            [nn.Parameter(Variable(torch.randn(self.config["hidden_dim"], ) * 0.01, requires_grad=True))
+            [nn.Parameter(Variable(torch.randn(self.config["hidden_dim"], ) * 0.1, requires_grad=True))
             for _ in range(self.config["d"])])
         
         self.masks = [torch.transpose(1. - F.one_hot(torch.tensor([i] * self.config["hidden_dim"]), self.config["d"]), 0, 1) 
@@ -26,10 +26,10 @@ class CASTLE(nn.Module):
         self.fc2 = nn.Linear(self.config["hidden_dim"], self.config["hidden_dim"])
 
         self.W3 = nn.ParameterList(
-            [nn.Parameter(Variable(torch.randn(self.config["hidden_dim"], 1) * 0.01, requires_grad=True))
+            [nn.Parameter(Variable(torch.randn(self.config["hidden_dim"], 1) * 0.1, requires_grad=True))
             for _ in range(self.config["d"])])
         self.b3 = nn.ParameterList(
-            [nn.Parameter(Variable(torch.randn(1, ) * 0.01, requires_grad=True))
+            [nn.Parameter(Variable(torch.randn(1, ) * 0.1, requires_grad=True))
             for _ in range(self.config["d"])])
     
     def build_adjacency_matrix(self):
