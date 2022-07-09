@@ -179,7 +179,7 @@ def train(X, model, config, optimizer):
     return logs
 #%%
 def main():
-    config = vars(get_args(debug=True)) # default configuration
+    config = vars(get_args(debug=False)) # default configuration
     config["cuda"] = torch.cuda.is_available()
     wandb.config.update(config)
     
