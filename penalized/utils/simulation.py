@@ -110,10 +110,10 @@ class SyntheticDataset:
         Returns:
             numpy.ndarray: [d, d] binary adjacency matrix of DAG.
         """
-        def _random_permutation(B_bin):
-            # np.random.permutation permutes first axis only
-            P = rs.permutation(np.eye(B_bin.shape[0]))
-            return P.T @ B_bin @ P
+        # def _random_permutation(B_bin):
+        #     # np.random.permutation permutes first axis only
+        #     P = rs.permutation(np.eye(B_bin.shape[0]))
+        #     return P.T @ B_bin @ P
 
         if graph_type == 'ER':
             B_bin = SyntheticDataset.simulate_er_dag(d, degree, rs)
@@ -121,7 +121,7 @@ class SyntheticDataset:
             B_bin = SyntheticDataset.simulate_sf_dag(d, degree)
         else:
             raise ValueError("Unknown graph type.")
-        return _random_permutation(B_bin)
+        return B_bin
 
     @staticmethod
     def simulate_weight(B_bin, B_ranges, rs=np.random.RandomState(1)):

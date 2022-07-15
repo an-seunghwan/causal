@@ -82,11 +82,8 @@ def get_args(debug):
 def loss_function(X, theta, j, config, w=None):
     loss_ = {}
     
-    target = j
-    predictor = list(range(j))
-    
     """L2 norm loss"""
-    recon = torch.pow(X[:, target] - X[:, predictor] @ theta, 2).sum() / config["n"]
+    recon = torch.pow(X[:, j] - X[:, :j] @ theta, 2).sum() / config["n"]
     loss_["recon"] = recon
     
     """sparsity loss (LASSO)"""
@@ -157,9 +154,9 @@ def main():
             """stopping rule"""
             with torch.no_grad():
                 if np.abs(loss_old - loss.detach().item()) < config["tol"]:
-                    B_est[j, :j] = theta.detach().t()
+                    B_est[j, :j] = theta.detach().clone().t()
                     break
-                loss_old = loss.detach()
+                loss_old = loss.detach().clone()
     
     """adaptive weight"""
     weights = torch.tensor(np.tril(
