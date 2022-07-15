@@ -7,6 +7,7 @@ import pandas as pd
 import tqdm
 import networkx as nx
 
+import scipy.stats
 import torch
 
 from utils.simulation import (
@@ -57,15 +58,17 @@ def get_args(debug):
     parser.add_argument('--B_scale', type=float, default=1,
                         help='scaling factor for range of B')
 
-    parser.add_argument('--lambda', default=2e-2, type=float,
-                        help='coefficient of LASSO penalty')
+    parser.add_argument('--alpha', default=0.1, type=float,
+                        help='one of coefficient of LASSO penalty')
     
-    parser.add_argument('--lr', default=1e-3, type=float,
+    parser.add_argument('--lr', default=1e-2, type=float,
                         help='learning rate')
     parser.add_argument('--epochs', default=10000, type=int,
                         help='number of iterations for training')
+    parser.add_argument('--tol', default=1e-8, type=int,
+                        help='stopping rule for theta')
     
-    parser.add_argument('--w_threshold', default=0.3, type=float,
+    parser.add_argument('--w_threshold', default=0.0001, type=float,
                         help='Threshold used to determine whether has edge in graph, element greater'
                             'than the w_threshold means has a directed edge, otherwise has not.')
     
@@ -76,31 +79,31 @@ def get_args(debug):
     else:    
         return parser.parse_args()
 #%%
-def h_function(w, config):
-    h_A = torch.trace(torch.matrix_exp(w * w)) - config["d"]
-    return h_A
-#%%
-def loss_function(X, theta, topological_order, j, config):
+def loss_function(X, theta, j, config, w=None):
     loss_ = {}
     
-    target = topological_order[j]
-    predictor = topological_order[:j]
+    target = j
+    predictor = list(range(j))
     
     """L2 norm loss"""
-    recon = torch.pow(X[:, target] - X[:, predictor] @ theta[predictor, target], 2).sum() / config["n"]
+    recon = torch.pow(X[:, target] - X[:, predictor] @ theta, 2).sum() / config["n"]
     loss_["recon"] = recon
     
     """sparsity loss (LASSO)"""
-    L1 = torch.linalg.norm(theta, ord=1)
+    L1_lambda = 2 * pow(config["n"], -1/2) * scipy.stats.norm.ppf(1 - config["alpha"] / (2 * config["d"] * j))
+    if w is not None:
+        L1 = (w * torch.abs(theta).t()).sum()
+    else:
+        L1 = torch.linalg.norm(theta, ord=1)
     loss_['L1'] = L1
-
-    loss = recon + config["lambda"] * L1
+    
+    loss = recon + L1_lambda * L1
     loss_['loss'] = loss
     
     return loss, loss_
 #%%
 def main():
-    config = vars(get_args(debug=False)) # default configuration
+    config = vars(get_args(debug=True)) # default configuration
     config["cuda"] = torch.cuda.is_available()
     wandb.config.update(config)
     
@@ -114,60 +117,85 @@ def main():
     X = dataset.X
     # center the dataset
     X = X - X.mean(axis=0, keepdims=True)
+    X = X / X.std(axis=0, keepdims=True)
     X = torch.FloatTensor(X)
     if config["cuda"]:
         X = X.cuda()
     B_true = dataset.B
-    B_bin_true = dataset.B_bin
+    # B_bin_true = dataset.B_bin
+    
+    """check lower triangular matrix"""
+    assert np.allclose(B_true, np.tril(B_true))
     
     wandb.run.summary['W_true'] = wandb.Table(data=pd.DataFrame(B_true))
-    fig = viz_graph(B_true.round(2), size=(7, 7), show=config["fig_show"])
-    wandb.log({'Graph': wandb.Image(fig)})
+    
     fig = viz_heatmap(B_true.round(2), size=(5, 4), show=config["fig_show"])
     wandb.log({'heatmap': wandb.Image(fig)})
     
-    """topological ordering"""
-    topological_order = []
-    remains = list(range(config["d"]))
-    idx = np.argmin([np.cov(X[:, topological_order + [i]].T) for i in remains])
-    z = remains[idx]
-    topological_order.append(z)
-    remains.remove(z)
+    """regular LASSO"""
+    B_est = np.zeros((config["d"], config["d"]))
     for j in range(1, config["d"]):
-        tmp = [np.cov(X[:, topological_order + [i]].T) for i in remains]
-        tmp = [t + 1e-8 * np.eye(len(topological_order) + 1) for t in tmp] # numerical stability
-        tmp = [1. / np.linalg.inv(t)[-1, -1] for t in tmp]
-        idx = np.argmin(tmp)
-        z = remains[idx]
-        topological_order.append(z)
-        remains.remove(z)
-    assert len(remains) == 0
-    
-    # G = nx.DiGraph(B_true)
-    
-    theta = torch.nn.init.normal_(torch.zeros((config["d"], config["d"]), requires_grad=True), 
-                                mean=0.0, std=0.1)
-    optimizer = torch.optim.Adam([theta], lr=config["lr"])
-    for j in range(1, config["d"]):
-        print("\n{}th variable among {} variables...".format(j+1, config["d"]))
+        theta = torch.nn.init.normal_(torch.zeros((j, 1), requires_grad=True), 
+                                    mean=0.0, std=0.1)
+        optimizer = torch.optim.Adam([theta], lr=config["lr"])
         
-        for iteration in range(config["epochs"]):
+        loss_old = np.inf
+        for iteration in tqdm.tqdm(range(config["epochs"]), desc="regular LASSO of {}".format(j+1)):
             optimizer.zero_grad()
-            loss, loss_ = loss_function(X, theta, topological_order, j, config)
+            loss, loss_ = loss_function(X, theta, j, config)
             loss.backward()
             optimizer.step()
             
-            with torch.no_grad():
-                h = h_function(theta, config)
-                loss_['h(B)'] = h
-            
-            if iteration % 500 == 0:
-                print_input = "[iteration {:03d}]".format(iteration)
-                print_input += ''.join([', {}: {:.4f}'.format(x, y.item()) for x, y in loss_.items()])
-                print(print_input)
+            # if iteration % 100 == 0:
+            #     print_input = "[iteration {:03d}]".format(iteration)
+            #     print_input += ''.join([', {}: {:.4f}'.format(x, y.item()) for x, y in loss_.items()])
+            #     print(print_input)
             
             """update log"""
             wandb.log({x : y.item() for x, y in loss_.items()})
+            
+            """stopping rule"""
+            with torch.no_grad():
+                if np.abs(loss_old - loss.detach().item()) < config["tol"]:
+                    B_est[j, :j] = theta.detach().t()
+                    break
+                loss_old = loss.detach()
+    
+    """adaptive weight"""
+    weights = torch.tensor(np.tril(
+        np.maximum(1, np.nan_to_num(1 / np.abs(B_est), posinf=0)),
+        k=-1))
+                
+    """adaptive LASSO"""
+    B_est = np.zeros((config["d"], config["d"]))
+    for j in range(1, config["d"]):
+        theta = torch.nn.init.normal_(torch.zeros((j, 1), requires_grad=True), 
+                                    mean=0.0, std=0.1)
+        optimizer = torch.optim.Adam([theta], lr=config["lr"])
+        
+        w = weights[j, :j]
+        
+        loss_old = np.inf
+        for iteration in tqdm.tqdm(range(config["epochs"]), desc="adaptive LASSO of {}".format(j + 1)):
+            optimizer.zero_grad()
+            loss, loss_ = loss_function(X, theta, j, config, w)
+            loss.backward()
+            optimizer.step()
+            
+            # if iteration % 100 == 0:
+            #     print_input = "[iteration {:03d}]".format(iteration)
+            #     print_input += ''.join([', {}: {:.4f}'.format(x, y.item()) for x, y in loss_.items()])
+            #     print(print_input)
+            
+            """update log"""
+            wandb.log({x : y.item() for x, y in loss_.items()})
+            
+            """stopping rule"""
+            with torch.no_grad():
+                if np.abs(loss_old - loss.detach().item()) < config["tol"]:
+                    B_est[j, :j] = theta.detach().t()
+                    break
+                loss_old = loss.detach()
     
     """post-process"""
     B_hat = theta.detach().numpy().copy()
