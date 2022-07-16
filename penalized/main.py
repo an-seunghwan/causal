@@ -8,7 +8,8 @@ import tqdm
 import networkx as nx
 
 import scipy.stats
-import torch
+from pyglmnet import GLMCV
+import asgl
 
 from utils.simulation import (
     set_random_seed,
@@ -47,9 +48,9 @@ def get_args(debug):
                         help='seed for repeatable results')
     parser.add_argument('--n', default=1000, type=int,
                         help='the number of dataset')
-    parser.add_argument('--d', default=10, type=int,
+    parser.add_argument('--d', default=20, type=int,
                         help='the number of nodes')
-    parser.add_argument('--degree', default=3, type=int,
+    parser.add_argument('--degree', default=4, type=int,
                         help='degree of graph')
     parser.add_argument('--graph_type', type=str, default='ER',
                         help='graph type: ER or SF')
@@ -58,15 +59,16 @@ def get_args(debug):
     parser.add_argument('--B_scale', type=float, default=1,
                         help='scaling factor for range of B')
 
-    parser.add_argument('--alpha', default=0.1, type=float,
-                        help='one of coefficient of LASSO penalty')
-    
-    parser.add_argument('--lr', default=1e-2, type=float,
-                        help='learning rate')
-    parser.add_argument('--epochs', default=10000, type=int,
-                        help='number of iterations for training')
-    parser.add_argument('--tol', default=1e-8, type=int,
-                        help='stopping rule for theta')
+    # parser.add_argument('--lr', default=1e-2, type=float,
+    #                     help='learning rate')
+    # parser.add_argument('--epochs', default=10000, type=int,
+    #                     help='number of iterations for training')
+    # parser.add_argument('--tol', default=1e-8, type=float,
+    #                     help='stopping criterion tolerance')
+    parser.add_argument('--alpha1', default=0.9, type=float,
+                        help='choice of tuining parameter for initial weight')
+    parser.add_argument('--alpha2', default=0.1, type=float,
+                        help='choice of tuining parameter for adaptive LASSO weight')
     
     parser.add_argument('--w_threshold', default=0.0001, type=float,
                         help='Threshold used to determine whether has edge in graph, element greater'
@@ -79,35 +81,10 @@ def get_args(debug):
     else:    
         return parser.parse_args()
 #%%
-def loss_function(X, theta, j, config, w=None):
-    loss_ = {}
-    
-    """L2 norm loss"""
-    recon = torch.pow(X[:, j] - X[:, :j] @ theta, 2).sum() / config["n"]
-    loss_["recon"] = recon
-    
-    """sparsity loss (LASSO)"""
-    L1_lambda = 2 * pow(config["n"], -1/2) * scipy.stats.norm.ppf(1 - config["alpha"] / (2 * config["d"] * j))
-    if w is not None:
-        L1 = (w * torch.abs(theta).t()).sum()
-    else:
-        L1 = torch.linalg.norm(theta, ord=1)
-    loss_['L1'] = L1
-    
-    loss = recon + L1_lambda * L1
-    loss_['loss'] = loss
-    
-    return loss, loss_
-#%%
 def main():
     config = vars(get_args(debug=True)) # default configuration
-    config["cuda"] = torch.cuda.is_available()
     wandb.config.update(config)
-    
     set_random_seed(config["seed"])
-    torch.manual_seed(config["seed"])
-    if config["cuda"]:
-        torch.cuda.manual_seed(config["seed"])
     
     """load dataset"""   
     dataset = SyntheticDataset(config)
@@ -115,9 +92,6 @@ def main():
     # center the dataset
     X = X - X.mean(axis=0, keepdims=True)
     X = X / X.std(axis=0, keepdims=True)
-    X = torch.FloatTensor(X)
-    if config["cuda"]:
-        X = X.cuda()
     B_true = dataset.B
     # B_bin_true = dataset.B_bin
     
@@ -125,92 +99,56 @@ def main():
     assert np.allclose(B_true, np.tril(B_true))
     
     wandb.run.summary['W_true'] = wandb.Table(data=pd.DataFrame(B_true))
-    
     fig = viz_heatmap(B_true.round(2), size=(5, 4), show=config["fig_show"])
     wandb.log({'heatmap': wandb.Image(fig)})
     
     """regular LASSO"""
     B_est = np.zeros((config["d"], config["d"]))
-    for j in range(1, config["d"]):
-        theta = torch.nn.init.normal_(torch.zeros((j, 1), requires_grad=True), 
-                                    mean=0.0, std=0.1)
-        optimizer = torch.optim.Adam([theta], lr=config["lr"])
-        
-        loss_old = np.inf
-        for iteration in tqdm.tqdm(range(config["epochs"]), desc="regular LASSO of {}".format(j+1)):
-            optimizer.zero_grad()
-            loss, loss_ = loss_function(X, theta, j, config)
-            loss.backward()
-            optimizer.step()
-            
-            # if iteration % 100 == 0:
-            #     print_input = "[iteration {:03d}]".format(iteration)
-            #     print_input += ''.join([', {}: {:.4f}'.format(x, y.item()) for x, y in loss_.items()])
-            #     print(print_input)
-            
-            """update log"""
-            wandb.log({x : y.item() for x, y in loss_.items()})
-            
-            """stopping rule"""
-            with torch.no_grad():
-                if np.abs(loss_old - loss.detach().item()) < config["tol"]:
-                    B_est[j, :j] = theta.detach().clone().t()
-                    break
-                loss_old = loss.detach().clone()
+    for j in tqdm.tqdm(range(1, config["d"]), desc="regular LASSO"):
+        # L1_lambda = 2 * pow(config["n"], -1/2) * scipy.stats.norm.ppf(1 - config["alpha1"] / (2 * config["d"] * j))
+        glm = GLMCV(distr="gaussian", 
+                    alpha=1, # LASSO
+                    reg_lambda=np.logspace(-3, -2, base=10, num=10), 
+                    cv=10, # num of cv = 10
+                    solver="cdfast", 
+                    fit_intercept=False)
+        glm.fit(X[:, :j], X[:, j])
+        # glm.reg_lambda_opt_
+        B_est[j, :j] = glm.beta_
     
     """adaptive weight"""
-    weights = torch.tensor(np.tril(
+    weights = np.tril(
         np.maximum(1, np.nan_to_num(1 / np.abs(B_est), posinf=0)),
-        k=-1))
-                
+        k=-1).astype(float)
+    
     """adaptive LASSO"""
-    B_est = np.zeros((config["d"], config["d"]))
-    for j in range(1, config["d"]):
-        theta = torch.nn.init.normal_(torch.zeros((j, 1), requires_grad=True), 
-                                    mean=0.0, std=0.1)
-        optimizer = torch.optim.Adam([theta], lr=config["lr"])
-        
-        w = weights[j, :j]
-        
-        loss_old = np.inf
-        for iteration in tqdm.tqdm(range(config["epochs"]), desc="adaptive LASSO of {}".format(j + 1)):
-            optimizer.zero_grad()
-            loss, loss_ = loss_function(X, theta, j, config, w)
-            loss.backward()
-            optimizer.step()
-            
-            # if iteration % 100 == 0:
-            #     print_input = "[iteration {:03d}]".format(iteration)
-            #     print_input += ''.join([', {}: {:.4f}'.format(x, y.item()) for x, y in loss_.items()])
-            #     print(print_input)
-            
-            """update log"""
-            wandb.log({x : y.item() for x, y in loss_.items()})
-            
-            """stopping rule"""
-            with torch.no_grad():
-                if np.abs(loss_old - loss.detach().item()) < config["tol"]:
-                    B_est[j, :j] = theta.detach().t()
-                    break
-                loss_old = loss.detach()
+    B_est_adaptive = np.zeros((config["d"], config["d"]))
+    for j in tqdm.tqdm(range(1, config["d"]), desc="adaptive LASSO"):
+        L1_lambda = 2 * pow(config["n"], -1/2) * scipy.stats.norm.ppf(1 - config["alpha2"] / (2 * config["d"] * j))
+        alasso = asgl.ASGL(model="lm", 
+                            penalization="alasso", 
+                            lambda1=L1_lambda, 
+                            alpha=1, # without group LASSO
+                            lasso_weights=weights[j, :j],
+                            intercept=False)
+        alasso.fit(X[:, :j], X[:, j])
+        B_est_adaptive[j, :j] = alasso.coef_[0]
     
     """post-process"""
-    B_hat = theta.detach().numpy().copy()
+    B_hat = B_est_adaptive.copy()
     B_hat[np.abs(B_hat) < config["w_threshold"]] = 0.
-    B_hat = B_hat.astype(float).round(2)
+    # B_hat = B_hat.astype(float).round(2)
     
-    fig = viz_graph(B_hat, size=(7, 7), show=config["fig_show"])
-    wandb.log({'Graph_est': wandb.Image(fig)})
     fig = viz_heatmap(B_hat, size=(5, 4), show=config["fig_show"])
     wandb.log({'heatmap_est': wandb.Image(fig)})
 
     wandb.run.summary['Is DAG?'] = is_dag(B_hat)
     wandb.run.summary['B_hat'] = wandb.Table(data=pd.DataFrame(B_hat))
-    B_diff = (B_true.astype(float).round(2) - B_hat).astype(float).round(2)
-    B_diff = (B_diff != 0).astype(float).round(2)
-    fig = viz_graph(B_diff, size=(7, 7), show=config["fig_show"])
-    wandb.log({'Graph_diff': wandb.Image(fig)})
-    wandb.run.summary['W_diff'] = wandb.Table(data=pd.DataFrame(B_diff))
+    # B_diff = (B_true.astype(float).round(2) - B_hat).astype(float).round(2)
+    # B_diff = (B_diff != 0).astype(float).round(2)
+    # fig = viz_graph(B_diff, size=(7, 7), show=config["fig_show"])
+    # wandb.log({'Graph_diff': wandb.Image(fig)})
+    # wandb.run.summary['W_diff'] = wandb.Table(data=pd.DataFrame(B_diff))
 
     """accuracy"""
     B_true_ = (B_true != 0).astype(float)
@@ -222,4 +160,63 @@ def main():
 #%%
 if __name__ == '__main__':
     main()
+#%%
+    # B_est = np.zeros((config["d"], config["d"]))
+    # for j in range(1, config["d"]):
+    #     theta = torch.nn.init.normal_(torch.zeros((j, 1), requires_grad=True), 
+    #                                 mean=0.0, std=0.1)
+    #     optimizer = torch.optim.Adam([theta], lr=config["lr"])
+        
+    #     loss_old = np.inf
+    #     for iteration in tqdm.tqdm(range(config["epochs"]), desc="regular LASSO of {}".format(j+1)):
+    #         optimizer.zero_grad()
+    #         loss, loss_ = loss_function(X, theta, j, config)
+    #         loss.backward()
+    #         optimizer.step()
+            
+    #         # if iteration % 100 == 0:
+    #         #     print_input = "[iteration {:03d}]".format(iteration)
+    #         #     print_input += ''.join([', {}: {:.4f}'.format(x, y.item()) for x, y in loss_.items()])
+    #         #     print(print_input)
+            
+    #         """update log"""
+    #         wandb.log({x : y.item() for x, y in loss_.items()})
+            
+    #         """stopping rule"""
+    #         with torch.no_grad():
+    #             if np.abs(loss_old - loss.detach().item()) < config["tol"]:
+    #                 B_est[j, :j] = theta.detach().clone().t()
+    #                 break
+    #             loss_old = loss.detach().clone()
+#%%
+    # X = torch.FloatTensor(X)
+    # B_est = np.zeros((config["d"], config["d"]))
+    # for j in range(1, config["d"]):
+    #     theta = torch.nn.init.normal_(torch.zeros((j, 1), requires_grad=True), 
+    #                                 mean=0.0, std=0.1)
+    #     optimizer = torch.optim.Adam([theta], lr=config["lr"])
+        
+    #     w = weights[j, :j]
+        
+    #     loss_old = np.inf
+    #     for iteration in tqdm.tqdm(range(config["epochs"]), desc="adaptive LASSO of {}".format(j + 1)):
+    #         optimizer.zero_grad()
+    #         loss, loss_ = loss_function(X, theta, j, config, w)
+    #         loss.backward()
+    #         optimizer.step()
+            
+    #         # if iteration % 100 == 0:
+    #         #     print_input = "[iteration {:03d}]".format(iteration)
+    #         #     print_input += ''.join([', {}: {:.4f}'.format(x, y.item()) for x, y in loss_.items()])
+    #         #     print(print_input)
+            
+    #         """update log"""
+    #         wandb.log({x : y.item() for x, y in loss_.items()})
+            
+    #         """stopping rule"""
+    #         with torch.no_grad():
+    #             if np.abs(loss_old - loss.detach().item()) < config["tol"]:
+    #                 B_est[j, :j] = theta.detach().t()
+    #                 break
+    #             loss_old = loss.detach()
 #%%
