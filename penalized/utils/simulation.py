@@ -121,7 +121,7 @@ class SyntheticDataset:
             B_bin = SyntheticDataset.simulate_sf_dag(d, degree)
         else:
             raise ValueError("Unknown graph type.")
-        return B_bin
+        return B_bin.T # upper triangular matrix
 
     @staticmethod
     def simulate_weight(B_bin, B_ranges, rs=np.random.RandomState(1)):
@@ -240,14 +240,17 @@ def main():
     config = {
         "seed": 1,
         "n": 1000,
-        "d": 20,
+        "d": 10,
         "graph_type": "ER",
-        "degree": 4,
+        "degree": 3,
         "B_scale": 1.,
         "noise_type": "gaussian_ev"
     }
     
     dataset = SyntheticDataset(config)
+    
+    G = nx.DiGraph(dataset.B)
+    ordered_vertices = list(nx.topological_sort(G))
     
     assert dataset.X.shape == (config["n"], config["d"])
     assert dataset.B.shape == (config["d"], config["d"])

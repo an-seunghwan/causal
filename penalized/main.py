@@ -82,7 +82,7 @@ def get_args(debug):
         return parser.parse_args()
 #%%
 def main():
-    config = vars(get_args(debug=True)) # default configuration
+    config = vars(get_args(debug=False)) # default configuration
     wandb.config.update(config)
     set_random_seed(config["seed"])
     
@@ -95,8 +95,11 @@ def main():
     B_true = dataset.B
     # B_bin_true = dataset.B_bin
     
+    # G = nx.DiGraph(B_true)
+    # list(nx.topological_sort(G))
+    
     """check lower triangular matrix"""
-    assert np.allclose(B_true, np.tril(B_true))
+    assert np.allclose(B_true, np.triu(B_true))
     
     wandb.run.summary['W_true'] = wandb.Table(data=pd.DataFrame(B_true))
     fig = viz_heatmap(B_true.round(2), size=(5, 4), show=config["fig_show"])
@@ -105,16 +108,21 @@ def main():
     """regular LASSO"""
     B_est = np.zeros((config["d"], config["d"]))
     for j in tqdm.tqdm(range(1, config["d"]), desc="regular LASSO"):
-        # L1_lambda = 2 * pow(config["n"], -1/2) * scipy.stats.norm.ppf(1 - config["alpha1"] / (2 * config["d"] * j))
+        L1_lambda = 2 * pow(config["n"], -1/2) * scipy.stats.norm.ppf(1 - config["alpha1"] / (2 * config["d"] * j))
         glm = GLMCV(distr="gaussian", 
                     alpha=1, # LASSO
-                    reg_lambda=np.logspace(-3, -2, base=10, num=10), 
-                    cv=10, # num of cv = 10
+                    reg_lambda=L1_lambda, 
                     solver="cdfast", 
                     fit_intercept=False)
+        # glm = GLMCV(distr="gaussian", 
+        #             alpha=1, # LASSO
+        #             reg_lambda=np.logspace(-3, -2, base=10, num=10), 
+        #             cv=10, # num of cv = 10
+        #             solver="cdfast", 
+        #             fit_intercept=False)
         glm.fit(X[:, :j], X[:, j])
         # glm.reg_lambda_opt_
-        B_est[j, :j] = glm.beta_
+        B_est[:j, j] = glm.beta_
     
     """adaptive weight"""
     weights = np.tril(
@@ -132,7 +140,7 @@ def main():
                             lasso_weights=weights[j, :j],
                             intercept=False)
         alasso.fit(X[:, :j], X[:, j])
-        B_est_adaptive[j, :j] = alasso.coef_[0]
+        B_est_adaptive[:j, j] = alasso.coef_[0]
     
     """post-process"""
     B_hat = B_est_adaptive.copy()
@@ -141,9 +149,9 @@ def main():
     
     fig = viz_heatmap(B_hat, size=(5, 4), show=config["fig_show"])
     wandb.log({'heatmap_est': wandb.Image(fig)})
-
-    wandb.run.summary['Is DAG?'] = is_dag(B_hat)
     wandb.run.summary['B_hat'] = wandb.Table(data=pd.DataFrame(B_hat))
+
+    # wandb.run.summary['Is DAG?'] = is_dag(B_hat)
     # B_diff = (B_true.astype(float).round(2) - B_hat).astype(float).round(2)
     # B_diff = (B_diff != 0).astype(float).round(2)
     # fig = viz_graph(B_diff, size=(7, 7), show=config["fig_show"])
