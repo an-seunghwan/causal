@@ -46,11 +46,11 @@ def get_args(debug):
 
     parser.add_argument('--seed', type=int, default=1, 
                         help='seed for repeatable results')
-    parser.add_argument('--n', default=1000, type=int,
+    parser.add_argument('--n', default=100, type=int,
                         help='the number of dataset')
-    parser.add_argument('--d', default=20, type=int,
+    parser.add_argument('--d', default=50, type=int,
                         help='the number of nodes')
-    parser.add_argument('--degree', default=4, type=int,
+    parser.add_argument('--degree', default=6, type=int,
                         help='degree of graph')
     parser.add_argument('--graph_type', type=str, default='ER',
                         help='graph type: ER or SF')
@@ -82,7 +82,7 @@ def get_args(debug):
         return parser.parse_args()
 #%%
 def main():
-    config = vars(get_args(debug=False)) # default configuration
+    config = vars(get_args(debug=True)) # default configuration
     wandb.config.update(config)
     set_random_seed(config["seed"])
     
@@ -102,7 +102,7 @@ def main():
     assert np.allclose(B_true, np.triu(B_true))
     
     wandb.run.summary['W_true'] = wandb.Table(data=pd.DataFrame(B_true))
-    fig = viz_heatmap(B_true.round(2), size=(5, 4), show=config["fig_show"])
+    fig = viz_heatmap(np.flipud(B_true.round(2)), size=(5, 4), show=config["fig_show"])
     wandb.log({'heatmap': wandb.Image(fig)})
     
     """regular LASSO"""
@@ -125,19 +125,20 @@ def main():
         B_est[:j, j] = glm.beta_
     
     """adaptive weight"""
-    weights = np.tril(
+    weights = np.triu(
         np.maximum(1, np.nan_to_num(1 / np.abs(B_est), posinf=0)),
-        k=-1).astype(float)
+        k=1).astype(float)
     
     """adaptive LASSO"""
     B_est_adaptive = np.zeros((config["d"], config["d"]))
     for j in tqdm.tqdm(range(1, config["d"]), desc="adaptive LASSO"):
         L1_lambda = 2 * pow(config["n"], -1/2) * scipy.stats.norm.ppf(1 - config["alpha2"] / (2 * config["d"] * j))
+        # cvxpy
         alasso = asgl.ASGL(model="lm", 
                             penalization="alasso", 
                             lambda1=L1_lambda, 
                             alpha=1, # without group LASSO
-                            lasso_weights=weights[j, :j],
+                            lasso_weights=weights[:j, j],
                             intercept=False)
         alasso.fit(X[:, :j], X[:, j])
         B_est_adaptive[:j, j] = alasso.coef_[0]
@@ -147,9 +148,9 @@ def main():
     B_hat[np.abs(B_hat) < config["w_threshold"]] = 0.
     # B_hat = B_hat.astype(float).round(2)
     
-    fig = viz_heatmap(B_hat, size=(5, 4), show=config["fig_show"])
+    wandb.run.summary['B_hat'] = wandb.Table(data=pd.DataFrame(B_hat))    
+    fig = viz_heatmap(np.flipud(B_hat), size=(5, 4), show=config["fig_show"])
     wandb.log({'heatmap_est': wandb.Image(fig)})
-    wandb.run.summary['B_hat'] = wandb.Table(data=pd.DataFrame(B_hat))
 
     # wandb.run.summary['Is DAG?'] = is_dag(B_hat)
     # B_diff = (B_true.astype(float).round(2) - B_hat).astype(float).round(2)
