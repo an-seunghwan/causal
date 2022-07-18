@@ -8,8 +8,8 @@ import tqdm
 import networkx as nx
 
 import scipy.stats
-from pyglmnet import GLMCV
-import asgl
+from sklearn.linear_model import LassoCV
+import cvxpy as cp
 
 from utils.simulation import (
     set_random_seed,
@@ -37,7 +37,7 @@ except:
 wandb.init(
     project="(causal)penalized", 
     entity="anseunghwan",
-    tags=["linear", "equal-var"],
+    tags=["linear", "equal-var", "CVXPY"],
 )
 #%%
 import argparse
@@ -82,7 +82,7 @@ def get_args(debug):
         return parser.parse_args()
 #%%
 def main():
-    config = vars(get_args(debug=False)) # default configuration
+    config = vars(get_args(debug=True)) # default configuration
     wandb.config.update(config)
     set_random_seed(config["seed"])
     
@@ -106,42 +106,60 @@ def main():
     wandb.log({'heatmap': wandb.Image(fig)})
     
     """regular LASSO"""
+    # def lasso_objective(X, Y, beta, lambd):
+    #     return (1.0 / X.shape[0]) * cp.sum_squares(X @ beta - Y) + lambd * cp.norm(beta, 1)
+    
     B_est = np.zeros((config["d"], config["d"]))
     for j in tqdm.tqdm(range(1, config["d"]), desc="regular LASSO"):
-        L1_lambda = 2 * pow(config["n"], -1/2) * scipy.stats.norm.ppf(1 - config["alpha1"] / (2 * config["d"] * j))
-        glm = GLMCV(distr="gaussian", 
-                    alpha=1, # LASSO
-                    reg_lambda=L1_lambda, 
-                    solver="cdfast", 
-                    fit_intercept=False)
-        # glm = GLMCV(distr="gaussian", 
-        #             alpha=1, # LASSO
-        #             reg_lambda=np.logspace(-3, -2, base=10, num=10), 
-        #             cv=10, # num of cv = 10
-        #             solver="cdfast", 
-        #             fit_intercept=False)
-        glm.fit(X[:, :j], X[:, j])
-        # glm.reg_lambda_opt_
-        B_est[:j, j] = glm.beta_
+        lasso = LassoCV(
+            cv=10, 
+            fit_intercept=False, 
+            max_iter=10000,
+            random_state=config["seed"]
+            ).fit(X[:, :j], X[:, j])
+        # for numerical stability
+        beta_ = lasso.coef_.copy()
+        beta_[np.abs(beta_) < 1e-6] = 0.
+        B_est[:j, j] = beta_
+        
+        # beta = cp.Variable(j)
+        # lambd = cp.Parameter(nonneg=True)
+        # L1_lambda = 2 * pow(config["n"], -1/2) * scipy.stats.norm.ppf(1 - config["alpha1"] / (2 * config["d"] * j))
+        # lambd.value = L1_lambda
+        # problem = cp.Problem(cp.Minimize(lasso_objective(X[:, :j], X[:, j], beta, lambd)))
+        # problem.solve()
+        # # for numerical stability
+        # beta_ = beta.value.copy()
+        # beta_[np.abs(beta_) < 1e-6] = 0.
+        # B_est[:j, j] = beta_
     
     """adaptive weight"""
-    weights = np.triu(
-        np.maximum(1, np.nan_to_num(1 / np.abs(B_est), posinf=0)),
-        k=1).astype(float)
+    weights = np.zeros((config["d"], config["d"]))
+    weights_ = np.nan_to_num(1 / np.abs(B_est), posinf=-1)
+    weights[weights_ > 0] = weights_[weights_ > 0]
     
     """adaptive LASSO"""
+    def adaptive_lasso_objective(X, Y, beta, lambd):
+        return (1.0 / X.shape[0]) * cp.sum_squares(X @ beta - Y) + lambd.T @ cp.abs(beta)
+    
     B_est_adaptive = np.zeros((config["d"], config["d"]))
     for j in tqdm.tqdm(range(1, config["d"]), desc="adaptive LASSO"):
+        # select candidate parents
+        candidates = np.where(weights[:j, j] != 0)[0]
+        w = weights[candidates, j]
+        
+        if len(candidates) == 0: continue
+        
+        beta = cp.Variable(len(candidates))
+        lambd = cp.Parameter(len(candidates), nonneg=True)
         L1_lambda = 2 * pow(config["n"], -1/2) * scipy.stats.norm.ppf(1 - config["alpha2"] / (2 * config["d"] * j))
-        # cvxpy
-        alasso = asgl.ASGL(model="lm", 
-                            penalization="alasso", 
-                            lambda1=L1_lambda, 
-                            alpha=1, # without group LASSO
-                            lasso_weights=weights[:j, j],
-                            intercept=False)
-        alasso.fit(X[:, :j], X[:, j])
-        B_est_adaptive[:j, j] = alasso.coef_[0]
+        lambd.value = L1_lambda * w
+        problem = cp.Problem(cp.Minimize(adaptive_lasso_objective(X[:, candidates], X[:, j], beta, lambd)))
+        problem.solve(solver='ECOS')
+        # for numerical stability
+        beta_ = beta.value.copy()
+        beta_[np.abs(beta_) < 1e-6] = 0.
+        B_est_adaptive[candidates, j] = beta_
     
     """post-process"""
     B_hat = B_est_adaptive.copy()
