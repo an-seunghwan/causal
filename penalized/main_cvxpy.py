@@ -106,22 +106,11 @@ def main():
     wandb.log({'heatmap': wandb.Image(fig)})
     
     """regular LASSO"""
-    # def lasso_objective(X, Y, beta, lambd):
-    #     return (1.0 / X.shape[0]) * cp.sum_squares(X @ beta - Y) + lambd * cp.norm(beta, 1)
+    def lasso_objective(X, Y, beta, lambd):
+        return (1.0 / X.shape[0]) * cp.sum_squares(X @ beta - Y) + lambd * cp.norm(beta, 1)
     
     B_est = np.zeros((config["d"], config["d"]))
     for j in tqdm.tqdm(range(1, config["d"]), desc="regular LASSO"):
-        lasso = LassoCV(
-            cv=10, 
-            fit_intercept=False, 
-            max_iter=10000,
-            random_state=config["seed"]
-            ).fit(X[:, :j], X[:, j])
-        # for numerical stability
-        beta_ = lasso.coef_.copy()
-        beta_[np.abs(beta_) < 1e-6] = 0.
-        B_est[:j, j] = beta_
-        
         # beta = cp.Variable(j)
         # lambd = cp.Parameter(nonneg=True)
         # L1_lambda = 2 * pow(config["n"], -1/2) * scipy.stats.norm.ppf(1 - config["alpha1"] / (2 * config["d"] * j))
@@ -132,16 +121,31 @@ def main():
         # beta_ = beta.value.copy()
         # beta_[np.abs(beta_) < 1e-6] = 0.
         # B_est[:j, j] = beta_
+        
+        lasso = LassoCV(
+            cv=10, 
+            fit_intercept=False, 
+            max_iter=10000,
+            random_state=config["seed"]
+            ).fit(X[:, :j], X[:, j])
+        # for numerical stability
+        beta_ = lasso.coef_.copy()
+        beta_[np.abs(beta_) < 1e-6] = 0.
+        B_est[:j, j] = beta_
     
     """adaptive weight"""
     weights = np.zeros((config["d"], config["d"]))
     weights_ = np.nan_to_num(1 / np.abs(B_est), posinf=-1)
     weights[weights_ > 0] = weights_[weights_ > 0]
     
+    # fig = viz_heatmap(np.flipud(weights.round(2)) / np.max(weights), size=(5, 4), show=config["fig_show"])
+    fig = viz_heatmap(np.flipud(weights.round(2)) != 0, size=(5, 4), show=config["fig_show"])
+    wandb.log({'weights': wandb.Image(fig)})
+    
     """adaptive LASSO"""
     def adaptive_lasso_objective(X, Y, beta, lambd):
-        # return (1.0 / X.shape[0]) * cp.sum_squares(X @ beta - Y) + lambd.T @ cp.abs(beta)
         return (1.0 / X.shape[0]) * cp.sum_squares(X @ beta - Y) + cp.norm(lambd.T @ cp.abs(beta), 1)
+        # return (1.0 / X.shape[0]) * cp.sum_squares(X @ beta - Y) + lambd.T @ cp.abs(beta)
     
     B_est_adaptive = np.zeros((config["d"], config["d"]))
     for j in tqdm.tqdm(range(1, config["d"]), desc="adaptive LASSO"):
