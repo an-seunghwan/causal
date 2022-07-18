@@ -140,7 +140,8 @@ def main():
     
     """adaptive LASSO"""
     def adaptive_lasso_objective(X, Y, beta, lambd):
-        return (1.0 / X.shape[0]) * cp.sum_squares(X @ beta - Y) + lambd.T @ cp.abs(beta)
+        # return (1.0 / X.shape[0]) * cp.sum_squares(X @ beta - Y) + lambd.T @ cp.abs(beta)
+        return (1.0 / X.shape[0]) * cp.sum_squares(X @ beta - Y) + cp.norm(lambd.T @ cp.abs(beta), 1)
     
     B_est_adaptive = np.zeros((config["d"], config["d"]))
     for j in tqdm.tqdm(range(1, config["d"]), desc="adaptive LASSO"):
