@@ -82,14 +82,14 @@ def get_args(debug):
         return parser.parse_args()
 #%%
 def main():
-    config = vars(get_args(debug=True)) # default configuration
+    config = vars(get_args(debug=False)) # default configuration
     wandb.config.update(config)
     set_random_seed(config["seed"])
     
     """load dataset"""   
     dataset = SyntheticDataset(config)
     X = dataset.X
-    # center the dataset
+    # standardization
     X = X - X.mean(axis=0, keepdims=True)
     X = X / X.std(axis=0, keepdims=True)
     B_true = dataset.B

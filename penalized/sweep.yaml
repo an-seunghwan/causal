@@ -5,17 +5,15 @@ metric:
   goal: minimize
   name: loss
 parameters:
-  # seed:
-  #   values: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-  n:
-    # values: [100, 1000]
-    values: [100]
-  d:
-    values: [10, 20, 50, 100]
-    # values: [50]
-  degree:
-    values: [3, 4, 5, 6, 7, 8]
-  alpha1:
-    values: [0.1, 0.9]
-  alpha2:
-    values: [0.1]
+  seed:
+    values: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+  # n:
+  #   values: [100]
+  # d:
+  #   values: [10, 20, 50, 100]
+  # degree:
+  #   values: [3, 4, 5, 6, 7, 8]
+  # alpha1:
+  #   values: [0.1, 0.9]
+  # alpha2:
+  #   values: [0.1]
