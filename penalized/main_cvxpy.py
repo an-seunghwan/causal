@@ -46,11 +46,11 @@ def get_args(debug):
 
     parser.add_argument('--seed', type=int, default=1, 
                         help='seed for repeatable results')
-    parser.add_argument('--n', default=100, type=int,
+    parser.add_argument('--n', default=1000, type=int,
                         help='the number of dataset')
-    parser.add_argument('--d', default=50, type=int,
+    parser.add_argument('--d', default=20, type=int,
                         help='the number of nodes')
-    parser.add_argument('--degree', default=6, type=int,
+    parser.add_argument('--degree', default=3, type=int,
                         help='degree of graph')
     parser.add_argument('--graph_type', type=str, default='ER',
                         help='graph type: ER or SF')
@@ -111,27 +111,27 @@ def main():
     
     B_est = np.zeros((config["d"], config["d"]))
     for j in tqdm.tqdm(range(1, config["d"]), desc="regular LASSO"):
-        # beta = cp.Variable(j)
-        # lambd = cp.Parameter(nonneg=True)
-        # L1_lambda = 2 * pow(config["n"], -1/2) * scipy.stats.norm.ppf(1 - config["alpha1"] / (2 * config["d"] * j))
-        # lambd.value = L1_lambda
-        # problem = cp.Problem(cp.Minimize(lasso_objective(X[:, :j], X[:, j], beta, lambd)))
-        # problem.solve()
-        # # for numerical stability
-        # beta_ = beta.value.copy()
-        # beta_[np.abs(beta_) < 1e-6] = 0.
-        # B_est[:j, j] = beta_
-        
-        lasso = LassoCV(
-            cv=10, 
-            fit_intercept=False, 
-            max_iter=10000,
-            random_state=config["seed"]
-            ).fit(X[:, :j], X[:, j])
+        beta = cp.Variable(j)
+        lambd = cp.Parameter(nonneg=True)
+        L1_lambda = 2 * pow(config["n"], -1/2) * scipy.stats.norm.ppf(1 - config["alpha1"] / (2 * config["d"] * j))
+        lambd.value = L1_lambda
+        problem = cp.Problem(cp.Minimize(lasso_objective(X[:, :j], X[:, j], beta, lambd)))
+        problem.solve()
         # for numerical stability
-        beta_ = lasso.coef_.copy()
+        beta_ = beta.value.copy()
         beta_[np.abs(beta_) < 1e-6] = 0.
         B_est[:j, j] = beta_
+        
+        # lasso = LassoCV(
+        #     cv=10, 
+        #     fit_intercept=False, 
+        #     max_iter=10000,
+        #     random_state=config["seed"]
+        #     ).fit(X[:, :j], X[:, j])
+        # # for numerical stability
+        # beta_ = lasso.coef_.copy()
+        # beta_[np.abs(beta_) < 1e-6] = 0.
+        # B_est[:j, j] = beta_
     
     """adaptive weight"""
     weights = np.zeros((config["d"], config["d"]))
@@ -144,8 +144,8 @@ def main():
     
     """adaptive LASSO"""
     def adaptive_lasso_objective(X, Y, beta, lambd):
-        return (1.0 / X.shape[0]) * cp.sum_squares(X @ beta - Y) + cp.norm(lambd.T @ cp.abs(beta), 1)
-        # return (1.0 / X.shape[0]) * cp.sum_squares(X @ beta - Y) + lambd.T @ cp.abs(beta)
+        # return (1.0 / X.shape[0]) * cp.sum_squares(X @ beta - Y) + cp.norm(lambd.T @ cp.abs(beta), 1)
+        return (1.0 / X.shape[0]) * cp.sum_squares(X @ beta - Y) + lambd.T @ cp.abs(beta)
     
     B_est_adaptive = np.zeros((config["d"], config["d"]))
     for j in tqdm.tqdm(range(1, config["d"]), desc="adaptive LASSO"):
